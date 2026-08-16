@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Stock Pro Library",
+  "extends": "./base.json",
+  "compilerOptions": {
+    "composite": true,
+    "incremental": true,
+    "removeComments": false
+  }
+}

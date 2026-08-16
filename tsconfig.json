@@ -1,0 +1,5 @@
+{
+  "extends": "@stock-pro/tsconfig/base.json",
+  "files": [],
+  "references": []
+}

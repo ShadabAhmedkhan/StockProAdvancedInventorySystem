@@ -1,0 +1,89 @@
+import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import { API_PREFIX, REQUEST_ID_HEADER, SWAGGER_PATH } from './common/constants/api.constants';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
+import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
+import type { AppConfiguration } from './config/app.config';
+
+const CORS_MAX_AGE_SECONDS = 86_400;
+
+/**
+ * Swagger UI is the only HTML this API serves and it ships an inline
+ * bootstrap script, so the docs build relaxes `script-src`. Every other
+ * deployment keeps helmet's stricter defaults.
+ */
+function securityHeaders(swaggerEnabled: boolean): ReturnType<typeof helmet> {
+  if (!swaggerEnabled) {
+    return helmet();
+  }
+
+  return helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'script-src': ["'self'", "'unsafe-inline'"],
+        'img-src': ["'self'", 'data:'],
+      },
+    },
+  });
+}
+
+/**
+ * Applies every cross-cutting concern to a Nest application instance.
+ *
+ * Shared by `main.ts` and the end-to-end tests so both exercise an identically
+ * configured app - a test must never pass against a different pipeline than
+ * the one that runs in production.
+ */
+export function configureApp(app: INestApplication, config: AppConfiguration): void {
+  // First in the chain: everything downstream reads req.requestId.
+  app.use(requestIdMiddleware);
+  app.use(securityHeaders(config.swaggerEnabled));
+
+  app.enableCors({
+    origin: config.corsOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', REQUEST_ID_HEADER],
+    exposedHeaders: [REQUEST_ID_HEADER],
+    maxAge: CORS_MAX_AGE_SECONDS,
+  });
+
+  app.setGlobalPrefix(API_PREFIX);
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      // Conversion stays explicit via @Type(); implicit coercion silently
+      // turns malformed input into plausible-looking values.
+      transformOptions: { enableImplicitConversion: false },
+      exceptionFactory: validationExceptionFactory,
+    }),
+  );
+
+  app.useGlobalInterceptors(new ResponseInterceptor());
+  app.useGlobalFilters(new AllExceptionsFilter(!config.isProduction));
+}
+
+/** Mounts Swagger UI and the OpenAPI JSON document at `/api/docs`. */
+export function setupSwagger(app: INestApplication): void {
+  const document = SwaggerModule.createDocument(
+    app,
+    new DocumentBuilder()
+      .setTitle('Stock Pro API')
+      .setDescription('Inventory, sales, repair, supplier, customer, return and finance management API.')
+      .setVersion('1.0.0')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
+      .build(),
+  );
+
+  SwaggerModule.setup(SWAGGER_PATH, app, document, {
+    customSiteTitle: 'Stock Pro API Docs',
+    swaggerOptions: { persistAuthorization: true },
+  });
+}

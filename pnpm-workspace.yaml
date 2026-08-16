@@ -1,0 +1,10 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# Prisma downloads its query engine in a postinstall script; pnpm 10 blocks
+# lifecycle scripts unless they are listed here.
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - prisma

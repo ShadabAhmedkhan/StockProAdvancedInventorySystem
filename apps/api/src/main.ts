@@ -1,0 +1,36 @@
+import 'reflect-metadata';
+import { Logger } from '@nestjs/common';
+import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module';
+import { configureApp, setupSwagger } from './app.setup';
+import { API_PREFIX, SWAGGER_PATH } from './common/constants/api.constants';
+import { appConfig, type AppConfiguration } from './config/app.config';
+
+async function bootstrap(): Promise<void> {
+  // Logs are buffered until the validated configuration tells us which levels
+  // to keep, then replayed by useLogger().
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  const config = app.get<AppConfiguration>(appConfig.KEY);
+
+  app.useLogger(config.logLevels);
+  configureApp(app, config);
+
+  if (config.swaggerEnabled) {
+    setupSwagger(app);
+  }
+
+  app.enableShutdownHooks();
+  await app.listen(config.port);
+
+  const logger = new Logger('Bootstrap');
+  logger.log(`Stock Pro API (${config.nodeEnv}) listening on http://localhost:${String(config.port)}/${API_PREFIX}`);
+  if (config.swaggerEnabled) {
+    logger.log(`Swagger UI available at http://localhost:${String(config.port)}/${SWAGGER_PATH}`);
+  }
+}
+
+bootstrap().catch((error: unknown) => {
+  new Logger('Bootstrap').error('Failed to start the Stock Pro API', error instanceof Error ? error.stack : undefined);
+  process.exit(1);
+});

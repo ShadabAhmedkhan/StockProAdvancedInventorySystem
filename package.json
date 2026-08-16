@@ -1,0 +1,41 @@
+{
+  "name": "stock-pro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stock Pro - inventory, sales, repair, supplier, customer, return and finance management platform.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --if-present run dev",
+    "dev:api": "pnpm --filter @stock-pro/api dev",
+    "dev:web": "pnpm --filter @stock-pro/web dev",
+    "build": "pnpm -r --if-present run build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc -b tsconfig.json && pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test",
+    "test:e2e": "pnpm -r --if-present run test:e2e",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:up": "docker compose --project-directory . -f infrastructure/docker-compose.yml up -d --wait",
+    "db:down": "docker compose --project-directory . -f infrastructure/docker-compose.yml down",
+    "db:logs": "docker compose --project-directory . -f infrastructure/docker-compose.yml logs -f",
+    "db:status": "docker compose --project-directory . -f infrastructure/docker-compose.yml ps",
+    "db:reset": "docker compose --project-directory . -f infrastructure/docker-compose.yml down -v",
+    "prisma:generate": "pnpm --filter @stock-pro/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @stock-pro/api prisma:migrate",
+    "prisma:studio": "pnpm --filter @stock-pro/api prisma:studio",
+    "db:seed": "pnpm --filter @stock-pro/api db:seed"
+  },
+  "devDependencies": {
+    "@stock-pro/eslint-config": "workspace:*",
+    "@stock-pro/tsconfig": "workspace:*",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3"
+  }
+}

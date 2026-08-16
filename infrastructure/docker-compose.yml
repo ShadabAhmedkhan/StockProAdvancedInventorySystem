@@ -1,0 +1,30 @@
+name: stock-pro
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: stock-pro-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockpro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stockpro}
+      POSTGRES_DB: ${POSTGRES_DB:-stockpro}
+      # Keep the cluster in a subdirectory so the volume mount point itself stays empty.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # 5433 on the host by default: 5432 is frequently taken by a natively
+      # installed PostgreSQL, and a half-bound port produces confusing
+      # authentication errors rather than a clean failure.
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-stockpro} -d ${POSTGRES_DB:-stockpro}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  postgres-data:
+    name: stock-pro-postgres-data

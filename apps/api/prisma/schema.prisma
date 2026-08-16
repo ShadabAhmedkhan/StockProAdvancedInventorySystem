@@ -1,0 +1,713 @@
+// Stock Pro database schema.
+//
+// Conventions
+//  - Every business table carries `id`, `createdAt` and `updatedAt`.
+//  - `deletedAt` exists only where a row is referenced by historical records
+//    and therefore must never be physically removed (catalogue and parties).
+//    Transactional records use a status instead.
+//  - Money is `Decimal(14, 2)`. Floating point is never used for money.
+//  - Table and column names use Prisma defaults so the schema is the single
+//    source of truth for both; all access goes through the generated client.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  STAFF
+  TECHNICIAN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  RETURN_IN
+  RETURN_OUT
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  REPAIR_IN
+  REPAIR_OUT
+}
+
+/// What caused a stock movement. `referenceId` points at a row of that kind.
+enum StockReferenceType {
+  ORDER
+  RETURN
+  REPAIR
+  PURCHASE
+  MANUAL
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentReferenceType {
+  ORDER
+  REPAIR
+  RETURN
+}
+
+enum DeviceType {
+  PHONE
+  TABLET
+  LAPTOP
+  DESKTOP
+  SMARTWATCH
+  ACCESSORY
+  OTHER
+}
+
+enum RepairStatus {
+  RECEIVED
+  DIAGNOSING
+  WAITING_APPROVAL
+  APPROVED
+  IN_PROGRESS
+  WAITING_PARTS
+  COMPLETED
+  DELIVERED
+  CANCELLED
+}
+
+enum ReturnReason {
+  DAMAGED
+  DEFECTIVE
+  WRONG_ITEM
+  NOT_AS_DESCRIBED
+  CHANGED_MIND
+  WARRANTY
+  OTHER
+}
+
+enum ReturnStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum ExpenseCategory {
+  RENT
+  UTILITIES
+  SALARIES
+  SUPPLIES
+  MARKETING
+  MAINTENANCE
+  TRANSPORT
+  TAXES
+  OTHER
+}
+
+enum TransactionType {
+  SALE
+  REFUND
+  EXPENSE
+  REPAIR_PAYMENT
+  OTHER_INCOME
+}
+
+enum TransactionReferenceType {
+  ORDER
+  REPAIR
+  RETURN
+  EXPENSE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGIN_FAILED
+  LOGOUT
+  ROLE_CHANGED
+  STATUS_CHANGED
+  STOCK_ADJUSTED
+  ORDER_COMPLETED
+  ORDER_CANCELLED
+  RETURN_APPROVED
+  RETURN_COMPLETED
+  REPAIR_STATUS_CHANGED
+  PAYMENT_RECORDED
+  EXPENSE_RECORDED
+}
+
+enum AuditEntity {
+  AUTH
+  USER
+  CUSTOMER
+  SUPPLIER
+  CATEGORY
+  BRAND
+  PRODUCT
+  INVENTORY
+  ORDER
+  REPAIR
+  RETURN
+  EXPENSE
+  PAYMENT
+  SETTING
+}
+
+enum SettingValueType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  firstName    String     @db.VarChar(100)
+  lastName     String     @db.VarChar(100)
+  email        String     @unique @db.VarChar(255)
+  passwordHash String     @db.VarChar(255)
+  role         UserRole   @default(STAFF)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  refreshTokens        RefreshToken[]
+  auditLogs            AuditLog[]
+  stockMovements       StockMovement[]
+  ordersCreated        Order[]
+  repairsAssigned      Repair[]               @relation("RepairTechnician")
+  repairStatusChanges  RepairStatusHistory[]
+  returnsCreated       Return[]
+  expensesCreated      Expense[]
+  paymentsRecorded     Payment[]
+  transactionsRecorded FinancialTransaction[]
+
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// One row per issued refresh token. Only the hash is stored, so a database
+/// leak cannot be replayed against the API. Rotation revokes the old row.
+model RefreshToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.VarChar(255)
+  userAgent String?   @db.VarChar(255)
+  ipAddress String?   @db.VarChar(64)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Parties
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  customerCode String    @unique @db.VarChar(32)
+  firstName    String    @db.VarChar(100)
+  lastName     String    @db.VarChar(100)
+  phone        String    @db.VarChar(32)
+  email        String?   @db.VarChar(255)
+  address      String?   @db.VarChar(500)
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  orders  Order[]
+  repairs Repair[]
+  returns Return[]
+
+  @@index([lastName, firstName])
+  @@index([phone])
+  @@index([email])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+model Supplier {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  supplierCode  String    @unique @db.VarChar(32)
+  name          String    @db.VarChar(200)
+  contactPerson String?   @db.VarChar(150)
+  phone         String    @db.VarChar(32)
+  email         String?   @db.VarChar(255)
+  address       String?   @db.VarChar(500)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  @@index([name])
+  @@index([phone])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  name        String    @unique @db.VarChar(120)
+  slug        String    @unique @db.VarChar(140)
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  products Product[]
+
+  @@index([deletedAt])
+}
+
+model Brand {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  name      String    @unique @db.VarChar(120)
+  slug      String    @unique @db.VarChar(140)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  products Product[]
+
+  @@index([deletedAt])
+}
+
+model Product {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  sku          String    @unique @db.VarChar(64)
+  barcode      String?   @unique @db.VarChar(64)
+  name         String    @db.VarChar(200)
+  description  String?
+  categoryId   String    @db.Uuid
+  brandId      String?   @db.Uuid
+  costPrice    Decimal   @db.Decimal(14, 2)
+  sellingPrice Decimal   @db.Decimal(14, 2)
+  minimumStock Int       @default(0)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  // Restrict: a category or brand that is still in use must be soft-deleted,
+  // never dropped out from under its products.
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand    Brand?   @relation(fields: [brandId], references: [id], onDelete: Restrict)
+
+  inventory      Inventory?
+  stockMovements StockMovement[]
+  orderItems     OrderItem[]
+  returnItems    ReturnItem[]
+  repairItems    RepairItem[]
+
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([isActive])
+  @@index([name])
+  @@index([deletedAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+
+/// Current stock level, kept separate from the product definition so a price
+/// edit never contends with a sale. Updated only inside a transaction that
+/// also writes a StockMovement.
+model Inventory {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  productId        String   @unique @db.Uuid
+  quantity         Int      @default(0)
+  reservedQuantity Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([quantity])
+}
+
+/// Append-only ledger. Every change to Inventory.quantity has exactly one row
+/// here, so the current level is always reconstructable from history.
+model StockMovement {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  productId        String             @db.Uuid
+  type             StockMovementType
+  quantity         Int
+  previousQuantity Int
+  newQuantity      Int
+  referenceType    StockReferenceType
+  referenceId      String?            @db.Uuid
+  note             String?            @db.VarChar(500)
+  createdById      String             @db.Uuid
+  createdAt        DateTime           @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  // Restrict keeps the ledger attributable: a user with movements cannot be
+  // hard-deleted, only deactivated.
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([productId, createdAt])
+  @@index([type])
+  @@index([referenceType, referenceId])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Sales
+// ---------------------------------------------------------------------------
+
+model Order {
+  id            String        @id @default(uuid(7)) @db.Uuid
+  orderNumber   String        @unique @db.VarChar(32)
+  customerId    String?       @db.Uuid
+  status        OrderStatus   @default(DRAFT)
+  subtotal      Decimal       @default(0) @db.Decimal(14, 2)
+  discount      Decimal       @default(0) @db.Decimal(14, 2)
+  tax           Decimal       @default(0) @db.Decimal(14, 2)
+  total         Decimal       @default(0) @db.Decimal(14, 2)
+  paidAmount    Decimal       @default(0) @db.Decimal(14, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+  notes         String?
+  createdById   String        @db.Uuid
+  /// Set when the order reaches COMPLETED. Revenue reporting keys off this,
+  /// not createdAt, so a draft raised last month cannot distort today's sales.
+  completedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // A walk-in sale has no customer record.
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  items    OrderItem[]
+  returns  Return[]
+  payments Payment[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([createdById])
+  @@index([completedAt])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  orderId   String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Int
+  /// Captured at sale time; later price changes must not rewrite history.
+  unitPrice Decimal  @db.Decimal(14, 2)
+  discount  Decimal  @default(0) @db.Decimal(14, 2)
+  total     Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  returnItems ReturnItem[]
+
+  @@unique([orderId, productId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Repairs
+// ---------------------------------------------------------------------------
+
+model Repair {
+  id                   String       @id @default(uuid(7)) @db.Uuid
+  repairNumber         String       @unique @db.VarChar(32)
+  customerId           String       @db.Uuid
+  deviceType           DeviceType
+  /// Manufacturer of the customer's device - unrelated to the sales catalogue.
+  brand                String?      @db.VarChar(100)
+  model                String?      @db.VarChar(100)
+  serialNumber         String?      @db.VarChar(100)
+  imei                 String?      @db.VarChar(32)
+  problemDescription   String
+  diagnosis            String?
+  estimatedCost        Decimal?     @db.Decimal(14, 2)
+  finalCost            Decimal?     @db.Decimal(14, 2)
+  technicianId         String?      @db.Uuid
+  status               RepairStatus @default(RECEIVED)
+  receivedAt           DateTime     @default(now())
+  expectedCompletionAt DateTime?
+  completedAt          DateTime?
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  technician User?    @relation("RepairTechnician", fields: [technicianId], references: [id], onDelete: Restrict)
+
+  items         RepairItem[]
+  statusHistory RepairStatusHistory[]
+  payments      Payment[]
+
+  @@index([customerId])
+  @@index([technicianId])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([completedAt])
+  @@index([serialNumber])
+  @@index([imei])
+}
+
+/// Parts consumed by a repair. Consumption deducts stock through a
+/// REPAIR_OUT movement in the same transaction.
+model RepairItem {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  repairId  String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(14, 2)
+  total     Decimal  @db.Decimal(14, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repair  Repair  @relation(fields: [repairId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([repairId, productId])
+  @@index([productId])
+}
+
+model RepairStatusHistory {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  repairId    String       @db.Uuid
+  /// Null on the first row, which records intake.
+  fromStatus  RepairStatus?
+  toStatus    RepairStatus
+  note        String?      @db.VarChar(500)
+  changedById String       @db.Uuid
+  createdAt   DateTime     @default(now())
+
+  repair    Repair @relation(fields: [repairId], references: [id], onDelete: Cascade)
+  changedBy User   @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([repairId, createdAt])
+  @@index([changedById])
+}
+
+// ---------------------------------------------------------------------------
+// Returns
+// ---------------------------------------------------------------------------
+
+model Return {
+  id           String       @id @default(uuid(7)) @db.Uuid
+  returnNumber String       @unique @db.VarChar(32)
+  orderId      String       @db.Uuid
+  customerId   String?      @db.Uuid
+  reason       ReturnReason
+  reasonNote   String?
+  status       ReturnStatus @default(PENDING)
+  refundAmount Decimal      @default(0) @db.Decimal(14, 2)
+  createdById  String       @db.Uuid
+  /// Set when the return reaches COMPLETED, which is when stock is restored
+  /// and the refund is recorded.
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  items    ReturnItem[]
+  payments Payment[]
+
+  @@index([orderId])
+  @@index([customerId])
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model ReturnItem {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  returnId    String   @db.Uuid
+  orderItemId String   @db.Uuid
+  productId   String   @db.Uuid
+  quantity    Int
+  unitPrice   Decimal  @db.Decimal(14, 2)
+  total       Decimal  @db.Decimal(14, 2)
+  /// False for goods that come back unsellable; those are refunded without a
+  /// RETURN_IN movement.
+  restock     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  returnRecord Return    @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([returnId, orderItemId])
+  @@index([productId])
+  @@index([orderItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Finance
+// ---------------------------------------------------------------------------
+
+model Expense {
+  id            String          @id @default(uuid(7)) @db.Uuid
+  expenseNumber String          @unique @db.VarChar(32)
+  category      ExpenseCategory
+  description   String          @db.VarChar(500)
+  amount        Decimal         @db.Decimal(14, 2)
+  expenseDate   DateTime        @db.Date
+  createdById   String          @db.Uuid
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([category])
+  @@index([expenseDate])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+/// Money actually moved. Exactly one of orderId / repairId / returnId is set,
+/// matching `referenceType`; the pairing is enforced by a check constraint.
+model Payment {
+  id            String               @id @default(uuid(7)) @db.Uuid
+  paymentNumber String               @unique @db.VarChar(32)
+  method        PaymentMethod
+  amount        Decimal              @db.Decimal(14, 2)
+  referenceType PaymentReferenceType
+  orderId       String?              @db.Uuid
+  repairId      String?              @db.Uuid
+  returnId      String?              @db.Uuid
+  /// External reference such as a card authorisation or transfer id.
+  reference     String?              @db.VarChar(120)
+  note          String?              @db.VarChar(500)
+  paidAt        DateTime             @default(now())
+  createdById   String               @db.Uuid
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  order        Order?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  repair       Repair? @relation(fields: [repairId], references: [id], onDelete: Restrict)
+  returnRecord Return? @relation(fields: [returnId], references: [id], onDelete: Restrict)
+  createdBy    User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([repairId])
+  @@index([returnId])
+  @@index([method])
+  @@index([paidAt])
+  @@index([createdById])
+}
+
+/// Ledger of financial events used by the dashboard and reports. `amount` is
+/// always non-negative; `type` determines whether it is income or outflow.
+model FinancialTransaction {
+  id            String                    @id @default(uuid(7)) @db.Uuid
+  type          TransactionType
+  amount        Decimal                   @db.Decimal(14, 2)
+  description   String                    @db.VarChar(500)
+  occurredAt    DateTime                  @default(now())
+  referenceType TransactionReferenceType?
+  referenceId   String?                   @db.Uuid
+  createdById   String                    @db.Uuid
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([type])
+  @@index([occurredAt])
+  @@index([referenceType, referenceId])
+  @@index([createdById])
+}
+
+// ---------------------------------------------------------------------------
+// Audit and settings
+// ---------------------------------------------------------------------------
+
+/// Append-only trail of security- and money-relevant events.
+/// `metadata` never carries passwords, tokens or other secrets.
+model AuditLog {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  /// Null for events with no authenticated actor, such as a failed login.
+  userId    String?     @db.Uuid
+  action    AuditAction
+  entity    AuditEntity
+  entityId  String?     @db.Uuid
+  metadata  Json?
+  ipAddress String?     @db.VarChar(64)
+  userAgent String?     @db.VarChar(255)
+  createdAt DateTime    @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Setting {
+  id          String           @id @default(uuid(7)) @db.Uuid
+  key         String           @unique @db.VarChar(100)
+  value       String
+  valueType   SettingValueType @default(STRING)
+  description String?          @db.VarChar(500)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
