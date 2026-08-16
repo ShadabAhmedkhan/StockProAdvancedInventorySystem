@@ -17,6 +17,10 @@ interface OpenApiDocument {
   paths: Record<string, unknown>;
 }
 
+/**
+ * Exercises the fully configured application, including the real database
+ * from infrastructure/docker-compose.yml: run `pnpm db:up` first.
+ */
 describe('Stock Pro API (e2e)', () => {
   let app: INestApplication;
   let server: Server;
@@ -43,8 +47,10 @@ describe('Stock Pro API (e2e)', () => {
       const body = response.body as ApiResponse<HealthCheckResult>;
 
       expect(body.data.status).toBe('ok');
+      expect(body.data.details).toHaveProperty('database');
       expect(body.data.details).toHaveProperty('memory_heap');
       expect(body.data.details).toHaveProperty('memory_rss');
+      expect(body.data.info?.database).toEqual({ status: 'up' });
       expect(body.meta.requestId).toEqual(expect.any(String));
       expect(Date.parse(body.meta.timestamp)).not.toBeNaN();
     });

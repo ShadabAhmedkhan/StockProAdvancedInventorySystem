@@ -5,7 +5,7 @@ import { PrismaClient } from '../../src/generated/prisma/client';
 
 loadEnvFile({ path: [resolve(__dirname, '../../.env'), resolve(__dirname, '../../../../.env')], quiet: true });
 
-const connectionString = process.env['DATABASE_URL'];
+const connectionString = process.env.DATABASE_URL;
 
 if (connectionString === undefined || connectionString === '') {
   throw new Error('DATABASE_URL is not set. Copy .env.example to .env at the repository root before seeding.');

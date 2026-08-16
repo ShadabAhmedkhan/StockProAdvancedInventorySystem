@@ -31,7 +31,10 @@ export class EnvironmentVariables {
    * PostgreSQL connection string. Deliberately has no default: booting against
    * an unintended database is worse than refusing to boot.
    */
-  @IsUrl({ protocols: ['postgres', 'postgresql'], require_tld: false, require_protocol: true }, { message: 'DATABASE_URL must be a postgres:// or postgresql:// connection string' })
+  @IsUrl(
+    { protocols: ['postgres', 'postgresql'], require_tld: false, require_protocol: true },
+    { message: 'DATABASE_URL must be a postgres:// or postgresql:// connection string' },
+  )
   DATABASE_URL: string;
 
   @Matches(ORIGIN_LIST, {

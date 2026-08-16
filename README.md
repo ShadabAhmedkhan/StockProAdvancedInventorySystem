@@ -21,17 +21,19 @@ Orders / Sales · Repairs · Returns · Finance · Reports · Audit history · S
 stock-pro/
 ├── apps/
 │   ├── api/                  NestJS REST API (TypeScript, Prisma, PostgreSQL)
+│   │   ├── prisma/           schema.prisma, migrations, seed
 │   │   ├── src/common/       Filters, interceptors, middleware, error codes
 │   │   ├── src/config/       Environment validation and typed app config
 │   │   ├── src/health/       Liveness and readiness probes
-│   │   └── test/             End-to-end (supertest) suite
+│   │   ├── src/prisma/       PrismaService and the global PrismaModule
+│   │   └── test/             End-to-end and database integration suites
 │   └── web/                  Next.js App Router admin dashboard                -> Phase 14
 ├── packages/
 │   ├── shared-types/         Framework-neutral shared types                    -> Phase 21
 │   ├── validation/           Zod schemas shared by API and web                 -> Phase 20
 │   ├── eslint-config/        Shared ESLint flat-config presets
 │   └── tsconfig/             Shared TypeScript compiler presets
-├── infrastructure/           Docker Compose (PostgreSQL)                       -> Phase 2
+├── infrastructure/           Docker Compose (PostgreSQL 17)
 ├── eslint.config.mjs         Root ESLint config (governs every package)
 ├── prettier.config.mjs       Root Prettier config
 ├── tsconfig.json             Root TypeScript solution file
@@ -109,25 +111,73 @@ variables on startup and refuses to boot if any are missing or weak.
 
 ## Database
 
-Local PostgreSQL runs in Docker (available from Phase 2):
+PostgreSQL 17 runs in Docker. The container publishes on **5433**, not 5432, so it does not
+collide with a natively installed PostgreSQL - a half-bound port produces confusing
+authentication failures rather than a clean error.
 
 ```powershell
-pnpm db:up        # start PostgreSQL
+pnpm db:up        # start PostgreSQL and wait until healthy
 pnpm db:status    # container status
 pnpm db:logs      # follow logs
-pnpm db:down      # stop
+pnpm db:down      # stop (data is preserved in the named volume)
+pnpm db:reset     # stop and DELETE the volume
 ```
 
-### Prisma migrations and seed
+### Prisma
 
 ```powershell
-pnpm --filter @stock-pro/api prisma:migrate     # apply migrations (dev)
-pnpm --filter @stock-pro/api prisma:generate    # regenerate the client
-pnpm --filter @stock-pro/api db:seed            # load development seed data
+pnpm prisma:migrate    # create/apply migrations in development
+pnpm prisma:generate   # regenerate the client (also runs on pnpm install)
+pnpm db:seed           # load development seed data
+pnpm prisma:studio     # browse the data
 ```
 
-Development seed credentials are documented once the seed exists (Phase 2). They are for
-local development only and must never be used as production defaults.
+Deployments apply migrations with `pnpm --filter @stock-pro/api prisma:deploy`, which never
+generates or resets anything.
+
+The Prisma client is generated into `apps/api/src/generated/prisma` and is **not committed**;
+a `postinstall` hook regenerates it, so a fresh clone can typecheck and build immediately.
+
+Prisma 7 connects through a driver adapter (`@prisma/adapter-pg`); `PrismaService` builds it
+from `DATABASE_URL`. Connection settings live in `apps/api/prisma.config.ts`, which loads the
+repository-root `.env`.
+
+### Seed data
+
+`pnpm db:seed` is re-runnable: every record is keyed on a natural identifier and either
+upserted or skipped, so running it twice does not duplicate orders or inflate stock. It
+creates 5 users, 8 customers, 4 suppliers, 5 categories, 6 brands, 20 products with opening
+stock and matching stock movements, 6 orders, 4 repairs with status history, and 8 expenses.
+Some products are seeded at zero or below their minimum so the low-stock and out-of-stock
+views have real data.
+
+| Account                 | Role       |
+| ----------------------- | ---------- |
+| `admin@stockpro.test`   | ADMIN      |
+| `manager@stockpro.test` | MANAGER    |
+| `staff1@stockpro.test`  | STAFF      |
+| `staff2@stockpro.test`  | STAFF      |
+| `tech@stockpro.test`    | TECHNICIAN |
+
+All seeded accounts share the password `Password123!`.
+
+> These credentials are for local development only. They must never be used as production
+> defaults; a production deployment creates its first administrator through the registration
+> endpoint, not by running this seed.
+
+### Schema notes
+
+- Money is `Decimal(14, 2)` everywhere. Floating point is never used for monetary values.
+- `deletedAt` exists only on rows that historical records point at (customers, suppliers,
+  categories, brands, products). Transactional records use a status instead.
+- `Inventory` is separate from `Product` so a price edit never contends with a sale, and
+  every change to `Inventory.quantity` is accompanied by a `StockMovement` row - the current
+  level is always reconstructable from the ledger.
+- Invariants the Prisma schema language cannot express are enforced as PostgreSQL check
+  constraints in the initial migration: stock can never go negative, reserved stock can never
+  exceed stock on hand, quantities are positive, monetary amounts are non-negative, and a
+  payment must point at exactly one subject matching its `referenceType`. These are the last
+  line of defence behind the application's transactional logic.
 
 ---
 
@@ -135,20 +185,26 @@ local development only and must never be used as production defaults.
 
 Run from the repository root.
 
-| Command                                            | Description                                       |
-| -------------------------------------------------- | ------------------------------------------------- |
-| `pnpm dev`                                         | Run every app in watch mode                       |
-| `pnpm dev:api`                                     | Run the API only                                  |
-| `pnpm dev:web`                                     | Run the web app only                              |
-| `pnpm build`                                       | Build every workspace package in dependency order |
-| `pnpm lint`                                        | ESLint across the monorepo                        |
-| `pnpm lint:fix`                                    | ESLint with autofix                               |
-| `pnpm typecheck`                                   | TypeScript project build + per-package typechecks |
-| `pnpm test`                                        | Unit and integration tests                        |
-| `pnpm test:e2e`                                    | End-to-end tests                                  |
-| `pnpm format`                                      | Prettier write                                    |
-| `pnpm format:check`                                | Prettier check                                    |
-| `pnpm db:up` / `db:down` / `db:logs` / `db:status` | Local PostgreSQL lifecycle                        |
+| Command                                                         | Description                                         |
+| --------------------------------------------------------------- | --------------------------------------------------- |
+| `pnpm dev`                                                      | Run every app in watch mode                         |
+| `pnpm dev:api`                                                  | Run the API only                                    |
+| `pnpm dev:web`                                                  | Run the web app only                                |
+| `pnpm build`                                                    | Build every workspace package in dependency order   |
+| `pnpm lint` / `pnpm lint:fix`                                   | ESLint across the monorepo, optionally with autofix |
+| `pnpm typecheck`                                                | TypeScript project build + per-package typechecks   |
+| `pnpm test`                                                     | Unit tests                                          |
+| `pnpm test:e2e`                                                 | End-to-end and database integration tests           |
+| `pnpm format` / `pnpm format:check`                             | Prettier write / check                              |
+| `pnpm db:up` / `db:down` / `db:logs` / `db:status` / `db:reset` | Local PostgreSQL lifecycle                          |
+| `pnpm prisma:migrate` / `prisma:generate` / `prisma:studio`     | Prisma workflow                                     |
+| `pnpm db:seed`                                                  | Load development seed data                          |
+
+`pnpm test:e2e` runs against the real database rather than mocks, so start it first:
+
+```powershell
+pnpm db:up ; pnpm prisma:migrate ; pnpm db:seed ; pnpm test:e2e
+```
 
 ---
 
@@ -217,18 +273,24 @@ Delivered so far:
   request correlation ids, the global validation pipe, helmet security headers, CORS,
   rate limiting, Swagger, and liveness/readiness probes. Unit and end-to-end tests
   included.
+- **Phase 2 — Database.** Dockerised PostgreSQL 17, the complete Prisma schema (22 tables,
+  17 enums) with its initial migration and check constraints, the global `PrismaModule`,
+  Argon2id password hashing, a re-runnable development seed, and a database readiness
+  indicator on `/api/v1/health`. Covered by an integration suite that asserts the
+  invariants against the real server.
 
 Not yet implemented (each is scheduled work, not a stub):
 
-database and Prisma schema (Phase 2) · authentication (3) · customers (4) · suppliers (5) ·
-product catalog (6) · inventory (7) · orders (8) · repairs (9) · returns (10) · finance (11) ·
-dashboard and reports (12) · audit and settings (13) · `apps/web` (14) and all UI phases
-(15-23) · full E2E suite (24) · performance and security review (25) · production build (26).
+authentication (Phase 3) · customers (4) · suppliers (5) · product catalog (6) ·
+inventory (7) · orders (8) · repairs (9) · returns (10) · finance (11) · dashboard and
+reports (12) · audit and settings (13) · `apps/web` (14) and all UI phases (15-23) ·
+full E2E suite (24) · performance and security review (25) · production build (26).
 
-The `packages/shared-types`, `packages/validation`, `apps/web` and `infrastructure`
-directories are reserved placeholders containing only a `.gitkeep`; they become real
-workspace packages in the phases noted above. The `db:*` root scripts reference
-`infrastructure/docker-compose.yml`, which arrives in Phase 2. `DATABASE_URL` and the JWT
-secrets appear in `.env.example` but are not yet validated on startup: each is added to the
-environment schema by the phase that first needs it, so from that point the API refuses to
-boot without them.
+The tables exist and are constrained, but only the health endpoints are exposed so far;
+each business module lands in the phase listed above.
+
+`packages/shared-types`, `packages/validation` and `apps/web` are reserved placeholders
+containing only a `.gitkeep`; they become real workspace packages in Phases 21, 20 and 14.
+`DATABASE_URL` is validated on startup. The JWT secrets appear in `.env.example` but are
+not yet in the environment schema; they are added in Phase 3, and from that point the API
+refuses to boot without them.

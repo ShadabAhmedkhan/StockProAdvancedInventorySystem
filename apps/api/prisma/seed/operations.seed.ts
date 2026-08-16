@@ -147,7 +147,15 @@ const REPAIRS: SeededRepair[] = [
     finalCost: '149.00',
     status: RepairStatus.DELIVERED,
     daysAgo: 21,
-    history: [RepairStatus.RECEIVED, RepairStatus.DIAGNOSING, RepairStatus.WAITING_APPROVAL, RepairStatus.APPROVED, RepairStatus.IN_PROGRESS, RepairStatus.COMPLETED, RepairStatus.DELIVERED],
+    history: [
+      RepairStatus.RECEIVED,
+      RepairStatus.DIAGNOSING,
+      RepairStatus.WAITING_APPROVAL,
+      RepairStatus.APPROVED,
+      RepairStatus.IN_PROGRESS,
+      RepairStatus.COMPLETED,
+      RepairStatus.DELIVERED,
+    ],
   },
   {
     repairNumber: 'REP-000002',
@@ -405,7 +413,7 @@ async function seedRepairs(users: SeededUsers, customers: SeededCustomers): Prom
             repairId: repair.id,
             fromStatus: previous,
             toStatus: status,
-            changedById: index === 0 ? users.staff[0]?.id ?? users.admin.id : users.technician.id,
+            changedById: index === 0 ? (users.staff[0]?.id ?? users.admin.id) : users.technician.id,
             createdAt: daysAgo(Math.max(definition.daysAgo - index, 0), 11),
           },
         });

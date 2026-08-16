@@ -110,7 +110,9 @@ describe('Database schema (integration)', () => {
     });
 
     it('records a status history row for every repair', async () => {
-      const repairs = await prisma.repair.findMany({ select: { id: true, status: true, statusHistory: { select: { toStatus: true }, orderBy: { createdAt: 'asc' } } } });
+      const repairs = await prisma.repair.findMany({
+        select: { id: true, status: true, statusHistory: { select: { toStatus: true }, orderBy: { createdAt: 'asc' } } },
+      });
 
       expect(repairs.length).toBeGreaterThan(0);
       for (const repair of repairs) {
