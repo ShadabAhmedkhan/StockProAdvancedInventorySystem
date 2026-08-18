@@ -1,5 +1,6 @@
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { API_PREFIX, REQUEST_ID_HEADER, SWAGGER_PATH } from './common/constants/api.constants';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -7,6 +8,7 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import type { AppConfiguration } from './config/app.config';
+import { serialiseDecimalsAsFixedStrings } from './prisma/decimal-json';
 
 const CORS_MAX_AGE_SECONDS = 86_400;
 
@@ -39,9 +41,14 @@ function securityHeaders(swaggerEnabled: boolean): ReturnType<typeof helmet> {
  * the one that runs in production.
  */
 export function configureApp(app: INestApplication, config: AppConfiguration): void {
+  serialiseDecimalsAsFixedStrings();
+
   // First in the chain: everything downstream reads req.requestId.
   app.use(requestIdMiddleware);
   app.use(securityHeaders(config.swaggerEnabled));
+  // The refresh token travels as an httpOnly cookie, so req.cookies must be
+  // populated before any route handler runs.
+  app.use(cookieParser());
 
   app.enableCors({
     origin: config.corsOrigins,

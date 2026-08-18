@@ -1,0 +1,1648 @@
+# Stock Pro — Build From Scratch
+
+You are a senior full-stack software architect and developer.
+
+Your task is to build **Stock Pro** completely from scratch as a production-quality monorepo.
+
+Do not copy old project code.
+
+We are starting from an empty directory.
+
+Work **phase by phase**. Do not jump ahead.
+
+After each phase:
+
+1. Implement the phase completely.
+2. Run lint.
+3. Run type checking.
+4. Run relevant tests.
+5. Run build where applicable.
+6. Fix every error introduced by the phase.
+7. Give me:
+
+   * files created
+   * files modified
+   * commands executed
+   * test/build results
+   * remaining work
+8. Stop and wait for the next phase instruction.
+
+Do not leave placeholder implementations, fake APIs, commented-out production logic, or TODOs unless explicitly documented as future-scope work.
+
+---
+
+# 0. Product
+
+Build a full-stack inventory, sales, repair, supplier, customer, return, and finance management application named:
+
+**Stock Pro**
+
+Primary business areas:
+
+* Authentication
+* Users
+* Dashboard
+* Customers
+* Suppliers
+* Products
+* Stock / Inventory
+* Orders / Sales
+* Repairs
+* Returns
+* Finance
+* Reports
+* Audit history
+* Settings
+
+---
+
+# 1. Technology Stack
+
+Use:
+
+## Monorepo
+
+* pnpm workspaces
+* Node.js 22+
+* TypeScript
+* Single root `pnpm-lock.yaml`
+
+Structure:
+
+```text
+stock-pro/
+├── apps/
+│   ├── api/
+│   └── web/
+├── packages/
+│   ├── shared-types/
+│   ├── validation/
+│   ├── eslint-config/
+│   └── tsconfig/
+├── infrastructure/
+├── package.json
+├── pnpm-workspace.yaml
+├── tsconfig.json
+├── prettier.config.mjs
+├── .gitignore
+├── .env.example
+└── README.md
+```
+
+---
+
+# 2. Backend Stack
+
+Use:
+
+* NestJS
+* TypeScript
+* PostgreSQL
+* Prisma ORM
+* JWT authentication
+* Access tokens
+* Refresh tokens
+* Argon2 password hashing
+* class-validator
+* class-transformer
+* Swagger/OpenAPI
+* NestJS ConfigModule
+* NestJS Throttler
+* Jest
+* Supertest
+
+API base path:
+
+```text
+/api/v1
+```
+
+Backend application:
+
+```text
+apps/api
+```
+
+---
+
+# 3. Frontend Stack
+
+Use:
+
+* Next.js
+* App Router
+* TypeScript
+* React
+* Tailwind CSS
+* shadcn/ui
+* React Hook Form
+* Zod
+* TanStack Query
+* Zustand only where global client state is genuinely required
+* Recharts for charts
+* Lucide icons
+* Playwright for E2E tests
+
+Frontend application:
+
+```text
+apps/web
+```
+
+---
+
+# 4. Database
+
+Use PostgreSQL with Prisma.
+
+Create proper:
+
+* primary keys
+* foreign keys
+* unique constraints
+* indexes
+* enums
+* timestamps
+* soft-delete strategy where appropriate
+
+Every major business table should normally contain:
+
+```text
+id
+createdAt
+updatedAt
+```
+
+Add `deletedAt` only where soft deletion makes business sense.
+
+Never use arbitrary strings where a proper enum or relationship is appropriate.
+
+---
+
+# 5. Core Database Entities
+
+Design Prisma models for at least:
+
+## User
+
+```text
+User
+- id
+- firstName
+- lastName
+- email
+- passwordHash
+- role
+- status
+- lastLoginAt
+- createdAt
+- updatedAt
+```
+
+Roles:
+
+```text
+ADMIN
+MANAGER
+STAFF
+TECHNICIAN
+```
+
+Statuses:
+
+```text
+ACTIVE
+INACTIVE
+SUSPENDED
+```
+
+---
+
+## RefreshToken / Session
+
+Store refresh-token sessions securely.
+
+Fields may include:
+
+```text
+id
+userId
+tokenHash
+expiresAt
+revokedAt
+createdAt
+```
+
+Never store raw refresh tokens.
+
+---
+
+## Customer
+
+```text
+Customer
+- id
+- customerCode
+- firstName
+- lastName
+- phone
+- email
+- address
+- notes
+- createdAt
+- updatedAt
+```
+
+---
+
+## Supplier
+
+```text
+Supplier
+- id
+- supplierCode
+- name
+- contactPerson
+- phone
+- email
+- address
+- notes
+- createdAt
+- updatedAt
+```
+
+---
+
+## Category
+
+```text
+Category
+- id
+- name
+- slug
+- description
+```
+
+---
+
+## Brand
+
+```text
+Brand
+- id
+- name
+- slug
+```
+
+---
+
+## Product
+
+```text
+Product
+- id
+- sku
+- barcode
+- name
+- description
+- categoryId
+- brandId
+- costPrice
+- sellingPrice
+- minimumStock
+- isActive
+- createdAt
+- updatedAt
+```
+
+Use decimal-compatible database types for money.
+
+Do not use floating-point numbers for monetary calculations.
+
+---
+
+## Stock
+
+Separate product definition from stock quantities.
+
+Design:
+
+```text
+Inventory
+- id
+- productId
+- quantity
+- reservedQuantity
+- updatedAt
+```
+
+Also create a stock movement ledger.
+
+```text
+StockMovement
+- id
+- productId
+- type
+- quantity
+- previousQuantity
+- newQuantity
+- referenceType
+- referenceId
+- note
+- createdById
+- createdAt
+```
+
+Movement types:
+
+```text
+PURCHASE
+SALE
+RETURN_IN
+RETURN_OUT
+ADJUSTMENT_IN
+ADJUSTMENT_OUT
+REPAIR_IN
+REPAIR_OUT
+```
+
+Stock must never change without creating a stock movement record.
+
+---
+
+# 6. Orders
+
+Models:
+
+```text
+Order
+OrderItem
+```
+
+Order:
+
+```text
+id
+orderNumber
+customerId
+status
+subtotal
+discount
+tax
+total
+paidAmount
+paymentStatus
+notes
+createdById
+createdAt
+updatedAt
+```
+
+Statuses:
+
+```text
+DRAFT
+CONFIRMED
+COMPLETED
+CANCELLED
+```
+
+Payment:
+
+```text
+UNPAID
+PARTIAL
+PAID
+REFUNDED
+```
+
+Order items:
+
+```text
+productId
+quantity
+unitPrice
+discount
+total
+```
+
+Order completion must correctly affect inventory.
+
+Use database transactions.
+
+---
+
+# 7. Repairs
+
+Create:
+
+```text
+Repair
+RepairItem
+RepairStatusHistory
+```
+
+Repair fields:
+
+```text
+repairNumber
+customerId
+deviceType
+brand
+model
+serialNumber
+imei
+problemDescription
+diagnosis
+estimatedCost
+finalCost
+technicianId
+status
+receivedAt
+expectedCompletionAt
+completedAt
+notes
+```
+
+Statuses:
+
+```text
+RECEIVED
+DIAGNOSING
+WAITING_APPROVAL
+APPROVED
+IN_PROGRESS
+WAITING_PARTS
+COMPLETED
+DELIVERED
+CANCELLED
+```
+
+Track status history.
+
+---
+
+# 8. Returns
+
+Create proper sales-return logic.
+
+Models:
+
+```text
+Return
+ReturnItem
+```
+
+Fields:
+
+```text
+returnNumber
+orderId
+customerId
+reason
+status
+refundAmount
+createdById
+createdAt
+```
+
+Statuses:
+
+```text
+PENDING
+APPROVED
+REJECTED
+COMPLETED
+```
+
+When an approved return is completed, stock must be adjusted correctly.
+
+---
+
+# 9. Finance
+
+Create:
+
+```text
+Expense
+Payment
+FinancialTransaction
+```
+
+Expense:
+
+```text
+expenseNumber
+category
+description
+amount
+expenseDate
+createdById
+```
+
+Payments should support:
+
+```text
+CASH
+CARD
+BANK_TRANSFER
+OTHER
+```
+
+Financial transaction types can include:
+
+```text
+SALE
+REFUND
+EXPENSE
+REPAIR_PAYMENT
+OTHER_INCOME
+```
+
+Financial calculations must be derived from source data where possible rather than duplicated unnecessarily.
+
+---
+
+# 10. Audit Logs
+
+Create an audit system.
+
+```text
+AuditLog
+- id
+- userId
+- action
+- entity
+- entityId
+- metadata
+- ipAddress
+- userAgent
+- createdAt
+```
+
+Track important events such as:
+
+* login
+* logout
+* user creation
+* role changes
+* product changes
+* inventory adjustments
+* order completion
+* returns
+* repair status changes
+* financial changes
+
+Do not store passwords, JWTs, refresh tokens, or sensitive secrets in audit metadata.
+
+---
+
+# 11. Backend Module Structure
+
+Inside:
+
+```text
+apps/api/src/
+```
+
+create:
+
+```text
+auth/
+users/
+customers/
+suppliers/
+categories/
+brands/
+products/
+stock/
+orders/
+repairs/
+returns/
+finance/
+dashboard/
+reports/
+audit/
+settings/
+prisma/
+common/
+config/
+```
+
+Each business module should follow NestJS conventions.
+
+Example:
+
+```text
+products/
+├── dto/
+│   ├── create-product.dto.ts
+│   ├── update-product.dto.ts
+│   └── product-query.dto.ts
+├── products.controller.ts
+├── products.service.ts
+├── products.module.ts
+└── products.service.spec.ts
+```
+
+---
+
+# 12. Common Backend Architecture
+
+Create reusable infrastructure for:
+
+```text
+common/
+├── decorators/
+├── filters/
+├── guards/
+├── interceptors/
+├── pipes/
+├── constants/
+├── enums/
+├── interfaces/
+└── utils/
+```
+
+Create:
+
+* global validation
+* centralized error handling
+* structured API responses
+* request IDs
+* pagination helpers
+* authentication guard
+* role guard
+* current-user decorator
+
+Do not over-engineer with unnecessary abstraction.
+
+---
+
+# 13. API Response Design
+
+Use consistent responses.
+
+Example:
+
+```json
+{
+  "data": {},
+  "meta": {}
+}
+```
+
+For lists:
+
+```json
+{
+  "data": [],
+  "meta": {
+    "page": 1,
+    "limit": 20,
+    "total": 100,
+    "totalPages": 5
+  }
+}
+```
+
+Errors should use a consistent structure.
+
+Example:
+
+```json
+{
+  "statusCode": 400,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
+  "errors": [],
+  "requestId": "..."
+}
+```
+
+---
+
+# 14. Authentication
+
+Implement:
+
+```text
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+POST /api/v1/auth/refresh
+POST /api/v1/auth/logout
+GET  /api/v1/auth/me
+```
+
+Requirements:
+
+* hash password with Argon2
+* short-lived access JWT
+* longer-lived refresh token
+* rotate refresh tokens
+* hash refresh tokens in database
+* reject revoked/expired tokens
+* rate-limit login
+* generic invalid-login errors
+* never return password hashes
+* validate environment secrets
+
+---
+
+# 15. REST API Modules
+
+Build CRUD + business endpoints for:
+
+```text
+/api/v1/users
+/api/v1/customers
+/api/v1/suppliers
+/api/v1/categories
+/api/v1/brands
+/api/v1/products
+/api/v1/stock
+/api/v1/orders
+/api/v1/repairs
+/api/v1/returns
+/api/v1/finance
+/api/v1/dashboard
+/api/v1/reports
+/api/v1/audit
+```
+
+All list endpoints should support appropriate:
+
+* pagination
+* searching
+* filtering
+* sorting
+
+Do not expose unrestricted arbitrary database sorting/filtering.
+
+Whitelist allowed fields.
+
+---
+
+# 16. Dashboard
+
+Dashboard APIs should return useful KPIs.
+
+Include:
+
+```text
+total sales
+sales today
+sales this month
+gross revenue
+expenses
+net position
+total products
+total inventory units
+inventory value
+low-stock products
+out-of-stock products
+active repairs
+completed repairs
+pending returns
+total customers
+recent sales
+recent stock movements
+sales chart
+repair status distribution
+```
+
+Avoid inefficient N+1 queries.
+
+---
+
+# 17. Frontend Routes
+
+Create:
+
+```text
+/
+├── login
+├── register
+├── dashboard
+├── customers
+│   ├── new
+│   └── [id]
+├── suppliers
+│   ├── new
+│   └── [id]
+├── products
+│   ├── new
+│   └── [id]
+├── inventory
+├── orders
+│   ├── new
+│   └── [id]
+├── repairs
+│   ├── new
+│   └── [id]
+├── returns
+│   └── [id]
+├── finance
+├── reports
+├── users
+├── audit
+└── settings
+```
+
+Protected routes require authentication.
+
+---
+
+# 18. Frontend Layout
+
+Create a professional admin dashboard.
+
+Main layout:
+
+```text
+Sidebar
+Topbar
+Page header
+Main content
+```
+
+Sidebar:
+
+```text
+Dashboard
+Customers
+Suppliers
+Products
+Inventory
+Orders
+Repairs
+Returns
+Finance
+Reports
+Users
+Audit Logs
+Settings
+```
+
+Support:
+
+* responsive desktop
+* tablet
+* mobile
+* collapsible sidebar
+* dark/light mode
+
+---
+
+# 19. Frontend Components
+
+Create reusable components such as:
+
+```text
+DataTable
+Pagination
+SearchInput
+FilterBar
+ConfirmDialog
+PageHeader
+StatCard
+EmptyState
+LoadingState
+ErrorState
+FormField
+CurrencyDisplay
+StatusBadge
+DateRangePicker
+```
+
+Do not create giant page components containing all logic.
+
+---
+
+# 20. Forms
+
+Use:
+
+* React Hook Form
+* Zod
+
+Create proper validation for:
+
+* login
+* registration
+* customer
+* supplier
+* product
+* stock adjustment
+* order
+* repair
+* return
+* expense
+* users
+
+Validation schemas shared with backend should live inside:
+
+```text
+packages/validation
+```
+
+where practical.
+
+---
+
+# 21. Shared Types
+
+Create:
+
+```text
+packages/shared-types
+```
+
+Keep framework-neutral shared types here.
+
+Examples:
+
+```text
+UserRole
+UserStatus
+OrderStatus
+PaymentStatus
+RepairStatus
+ReturnStatus
+PaginationMeta
+API response types
+```
+
+Do not import NestJS or React into shared packages.
+
+---
+
+# 22. API Client
+
+Frontend must have a centralized API layer.
+
+Suggested structure:
+
+```text
+apps/web/lib/api/
+├── client.ts
+├── auth.ts
+├── users.ts
+├── customers.ts
+├── suppliers.ts
+├── products.ts
+├── stock.ts
+├── orders.ts
+├── repairs.ts
+├── returns.ts
+├── finance.ts
+├── dashboard.ts
+└── reports.ts
+```
+
+Do not scatter raw `fetch()` calls throughout components.
+
+---
+
+# 23. Security
+
+Apply:
+
+* password hashing
+* JWT secret validation
+* refresh token rotation
+* RBAC
+* DTO validation
+* SQL injection protection through Prisma
+* API rate limiting
+* HTTP security headers
+* safe CORS configuration
+* no stack trace leakage in production
+* input sanitization where needed
+* audit logging
+* no secrets committed
+* secure production cookie strategy if refresh tokens use cookies
+
+Never put sensitive tokens into browser localStorage unless the selected authentication architecture explicitly requires it and the security implications are addressed.
+
+Prefer an appropriate secure authentication strategy.
+
+---
+
+# 24. Prisma Transactions
+
+Use transactions for workflows involving multiple dependent writes.
+
+Examples:
+
+```text
+complete order + deduct inventory + create stock movements + create payment
+complete return + restore stock + create stock movement + create refund
+repair completion + parts consumption + stock movement
+```
+
+The operation must either complete entirely or roll back entirely.
+
+---
+
+# 25. Concurrency
+
+Inventory cannot become incorrect because two sales happen simultaneously.
+
+Design inventory updates to avoid naive:
+
+```text
+read quantity
+subtract in JavaScript
+save quantity
+```
+
+Use transactional/atomic database operations and validate available stock inside the transaction.
+
+Prevent negative inventory unless the business rule explicitly allows it.
+
+---
+
+# 26. Money
+
+Never use JavaScript floating-point arithmetic as the authoritative method for business money calculations.
+
+Use Prisma Decimal or an equivalent safe strategy.
+
+Correctly handle:
+
+```text
+subtotal
+discount
+tax
+total
+paid amount
+remaining amount
+refund
+profit
+```
+
+---
+
+# 27. Environment Configuration
+
+Create:
+
+```text
+.env.example
+```
+
+Include variables such as:
+
+```env
+NODE_ENV=development
+
+DATABASE_URL=
+
+API_PORT=4000
+
+JWT_ACCESS_SECRET=
+JWT_REFRESH_SECRET=
+
+JWT_ACCESS_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=7d
+
+WEB_URL=http://localhost:3000
+
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api/v1
+```
+
+Validate required backend environment values on startup.
+
+---
+
+# 28. Docker
+
+Create:
+
+```text
+infrastructure/docker-compose.yml
+```
+
+Start PostgreSQL locally.
+
+Root commands should include:
+
+```bash
+pnpm db:up
+pnpm db:down
+pnpm db:logs
+pnpm db:status
+```
+
+---
+
+# 29. Root Scripts
+
+Create useful root scripts such as:
+
+```json
+{
+  "dev": "...",
+  "dev:api": "...",
+  "dev:web": "...",
+  "build": "...",
+  "lint": "...",
+  "lint:fix": "...",
+  "typecheck": "...",
+  "test": "...",
+  "format": "...",
+  "format:check": "...",
+  "db:up": "...",
+  "db:down": "...",
+  "db:status": "..."
+}
+```
+
+Use pnpm workspace filtering appropriately.
+
+---
+
+# 30. Code Quality
+
+Use:
+
+* ESLint
+* Prettier
+* strict TypeScript
+
+Recommended Prettier configuration:
+
+```js
+{
+  semi: true,
+  singleQuote: true,
+  trailingComma: 'all',
+  printWidth: 160,
+  tabWidth: 2,
+  useTabs: false,
+  bracketSpacing: true,
+  arrowParens: 'always',
+  endOfLine: 'lf',
+}
+```
+
+Avoid:
+
+```text
+any
+@ts-ignore
+eslint-disable
+unsafe casts
+non-null assertions
+```
+
+unless absolutely necessary and justified.
+
+---
+
+# 31. Testing
+
+Backend:
+
+* unit tests
+* integration tests
+* E2E tests
+
+Frontend:
+
+* component/unit testing where valuable
+* Playwright E2E
+
+Critical E2E scenarios:
+
+```text
+register
+login
+refresh token
+logout
+RBAC
+create customer
+create supplier
+create product
+stock adjustment
+create order
+complete order
+stock deduction
+reject insufficient stock
+return order item
+inventory restoration
+create repair
+repair status flow
+finance transaction
+dashboard data
+pagination
+search
+filters
+validation
+unauthorized access
+forbidden access
+```
+
+---
+
+# 32. Seed Data
+
+Create development seed data.
+
+Include:
+
+```text
+1 admin
+1 manager
+2 staff users
+customers
+suppliers
+categories
+brands
+products
+inventory
+orders
+repairs
+expenses
+```
+
+Development admin credentials can be clearly documented in README and must not be reused as production defaults.
+
+---
+
+# 33. Documentation
+
+README must contain:
+
+```text
+project description
+architecture
+requirements
+installation
+environment configuration
+database startup
+Prisma migration
+seed
+development commands
+build commands
+test commands
+frontend URL
+backend URL
+Swagger URL
+project structure
+```
+
+---
+
+# 34. Development Phases
+
+Follow exactly this order.
+
+## Phase 0 — Repository Bootstrap
+
+Only:
+
+* initialize root project
+* pnpm workspace
+* folder structure
+* shared TypeScript config
+* ESLint
+* Prettier
+* `.gitignore`
+* `.env.example`
+* README skeleton
+* verify root tooling
+
+No business logic yet.
+
+---
+
+## Phase 1 — NestJS Backend Bootstrap
+
+Create:
+
+```text
+apps/api
+```
+
+Configure:
+
+* NestJS
+* ConfigModule
+* environment validation
+* `/api/v1`
+* Swagger
+* CORS
+* validation pipe
+* exception handling
+* health endpoint
+* request ID
+
+Verify backend starts cleanly.
+
+---
+
+## Phase 2 — Database & Prisma
+
+Create:
+
+* Docker PostgreSQL
+* Prisma
+* schema
+* migrations
+* seed infrastructure
+* PrismaModule
+
+Build initial schema correctly before business endpoints.
+
+---
+
+## Phase 3 — Authentication
+
+Implement:
+
+* users
+* roles
+* registration
+* login
+* refresh
+* logout
+* current user
+* guards
+* decorators
+* throttling
+* tests
+
+Do not move forward until auth E2E tests pass.
+
+---
+
+## Phase 4 — Customers
+
+Implement backend customer CRUD, validation, pagination, search, filtering, tests.
+
+---
+
+## Phase 5 — Suppliers
+
+Implement supplier module and tests.
+
+---
+
+## Phase 6 — Product Catalog
+
+Implement:
+
+* categories
+* brands
+* products
+
+Add searching, filtering and pagination.
+
+---
+
+## Phase 7 — Inventory
+
+Implement:
+
+* inventory records
+* stock movements
+* adjustments
+* low stock
+* out of stock
+* stock history
+* transaction safety
+
+Add extensive tests.
+
+---
+
+## Phase 8 — Orders
+
+Implement:
+
+* orders
+* order items
+* totals
+* payments
+* completion
+* cancellation
+* inventory deduction
+* transaction safety
+
+---
+
+## Phase 9 — Repairs
+
+Implement complete repair workflow and status history.
+
+---
+
+## Phase 10 — Returns
+
+Implement returns and inventory restoration.
+
+---
+
+## Phase 11 — Finance
+
+Implement:
+
+* expenses
+* payments
+* financial transactions
+* financial summaries
+
+---
+
+## Phase 12 — Dashboard & Reports
+
+Implement aggregated APIs and performance-conscious queries.
+
+---
+
+## Phase 13 — Audit & Settings
+
+Implement audit trail and system settings.
+
+---
+
+## Phase 14 — Next.js Bootstrap
+
+Create:
+
+```text
+apps/web
+```
+
+Set up:
+
+* Next.js
+* Tailwind
+* shadcn/ui
+* providers
+* TanStack Query
+* API client
+* authentication foundation
+* layouts
+
+No complete business pages yet.
+
+---
+
+## Phase 15 — Authentication UI
+
+Implement:
+
+* login
+* register
+* logout
+* authenticated session
+* protected routing
+
+---
+
+## Phase 16 — Dashboard UI
+
+Build professional responsive dashboard.
+
+---
+
+## Phase 17 — Customers & Suppliers UI
+
+Implement complete frontend CRUD workflows.
+
+---
+
+## Phase 18 — Products & Inventory UI
+
+Implement:
+
+* product catalog
+* product forms
+* inventory table
+* stock movements
+* stock adjustment UI
+* low-stock indicators
+
+---
+
+## Phase 19 — Orders UI
+
+Implement complete point-of-sale/order workflow.
+
+---
+
+## Phase 20 — Repairs UI
+
+Implement repair management workflow.
+
+---
+
+## Phase 21 — Returns UI
+
+Implement return workflow.
+
+---
+
+## Phase 22 — Finance UI
+
+Implement finance pages and summaries.
+
+---
+
+## Phase 23 — Reports, Users & Settings UI
+
+Complete remaining admin functionality.
+
+---
+
+## Phase 24 — Full E2E Testing
+
+Test complete backend/frontend flows with Playwright and API E2E tests.
+
+Fix failures instead of weakening tests.
+
+---
+
+## Phase 25 — Performance & Security Review
+
+Review:
+
+```text
+database indexes
+N+1 queries
+API response times
+large tables
+pagination
+React rerenders
+bundle size
+authorization
+token handling
+input validation
+rate limits
+inventory race conditions
+financial calculations
+```
+
+---
+
+## Phase 26 — Production Build
+
+Run:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+All must pass.
+
+Produce final project report.
+
+---
+
+# 35. Important Working Rules
+
+Do not attempt all phases in one response.
+
+When I give:
+
+```text
+Start Phase 0
+```
+
+perform **Phase 0 only**.
+
+When Phase 0 passes I will tell you:
+
+```text
+Start Phase 1
+```
+
+Continue in this pattern.
+
+Before editing existing files, inspect them first.
+
+Do not delete working functionality unless required.
+
+Do not hide errors.
+
+Do not weaken ESLint, TypeScript, validation, or tests merely to make commands pass.
+
+Do not use mocks where real local infrastructure is practical.
+
+For every phase, keep the code production-oriented and maintainable.
+
+---
+
+# FIRST TASK
+
+Start with **Phase 0 only**.
+
+Assume the current folder is empty.
+
+Create the initial Stock Pro monorepo structure and give me the exact PowerShell commands required to initialize it on Windows using pnpm.

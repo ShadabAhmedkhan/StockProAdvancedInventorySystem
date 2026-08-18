@@ -12,6 +12,7 @@ import {
   TransactionType,
 } from '../../src/generated/prisma/enums';
 import type { SeededCatalog, SeededProductRecord } from './catalog.seed';
+import { DOCUMENT_SEQUENCES } from '../../src/common/documents/document-number';
 import { daysAgo, prisma } from './client';
 import type { SeededCustomers } from './parties.seed';
 import type { SeededUsers } from './users.seed';
@@ -40,7 +41,7 @@ interface SeededOrder {
 
 const ORDERS: SeededOrder[] = [
   {
-    orderNumber: 'ORD-000001',
+    orderNumber: 'ORD-00000001',
     customerCode: 'CUS-0001',
     daysAgo: 26,
     status: OrderStatus.COMPLETED,
@@ -54,7 +55,7 @@ const ORDERS: SeededOrder[] = [
     ],
   },
   {
-    orderNumber: 'ORD-000002',
+    orderNumber: 'ORD-00000002',
     customerCode: 'CUS-0002',
     daysAgo: 19,
     status: OrderStatus.COMPLETED,
@@ -67,7 +68,7 @@ const ORDERS: SeededOrder[] = [
     ],
   },
   {
-    orderNumber: 'ORD-000003',
+    orderNumber: 'ORD-00000003',
     customerCode: 'CUS-0003',
     daysAgo: 12,
     status: OrderStatus.COMPLETED,
@@ -80,7 +81,7 @@ const ORDERS: SeededOrder[] = [
     ],
   },
   {
-    orderNumber: 'ORD-000004',
+    orderNumber: 'ORD-00000004',
     customerCode: null,
     daysAgo: 5,
     status: OrderStatus.COMPLETED,
@@ -93,7 +94,7 @@ const ORDERS: SeededOrder[] = [
     ],
   },
   {
-    orderNumber: 'ORD-000005',
+    orderNumber: 'ORD-00000005',
     customerCode: 'CUS-0006',
     daysAgo: 2,
     status: OrderStatus.CONFIRMED,
@@ -103,7 +104,7 @@ const ORDERS: SeededOrder[] = [
     lines: [{ sku: 'TAB-HAL-T10', quantity: 1 }],
   },
   {
-    orderNumber: 'ORD-000006',
+    orderNumber: 'ORD-00000006',
     customerCode: 'CUS-0007',
     daysAgo: 0,
     status: OrderStatus.DRAFT,
@@ -134,7 +135,7 @@ interface SeededRepair {
 
 const REPAIRS: SeededRepair[] = [
   {
-    repairNumber: 'REP-000001',
+    repairNumber: 'REP-00000001',
     customerCode: 'CUS-0002',
     deviceType: DeviceType.PHONE,
     brand: 'Aureon',
@@ -158,7 +159,7 @@ const REPAIRS: SeededRepair[] = [
     ],
   },
   {
-    repairNumber: 'REP-000002',
+    repairNumber: 'REP-00000002',
     customerCode: 'CUS-0004',
     deviceType: DeviceType.PHONE,
     brand: 'Nimbus',
@@ -174,7 +175,7 @@ const REPAIRS: SeededRepair[] = [
     history: [RepairStatus.RECEIVED, RepairStatus.DIAGNOSING, RepairStatus.WAITING_APPROVAL, RepairStatus.APPROVED, RepairStatus.WAITING_PARTS],
   },
   {
-    repairNumber: 'REP-000003',
+    repairNumber: 'REP-00000003',
     customerCode: 'CUS-0005',
     deviceType: DeviceType.LAPTOP,
     brand: 'Corvid',
@@ -190,7 +191,7 @@ const REPAIRS: SeededRepair[] = [
     history: [RepairStatus.RECEIVED, RepairStatus.DIAGNOSING],
   },
   {
-    repairNumber: 'REP-000004',
+    repairNumber: 'REP-00000004',
     customerCode: 'CUS-0008',
     deviceType: DeviceType.TABLET,
     brand: 'Halcyon',
@@ -245,6 +246,7 @@ export async function seedOperations(users: SeededUsers, customers: SeededCustom
   await seedOrders(users, customers, catalog);
   await seedRepairs(users, customers);
   await seedExpenses(users);
+  await advanceDocumentSequences();
 
   return { orderCount: ORDERS.length, repairCount: REPAIRS.length, expenseCount: EXPENSES.length };
 }
@@ -339,7 +341,7 @@ async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalo
       if (paidAmount > 0) {
         await tx.payment.create({
           data: {
-            paymentNumber: `PAY-${definition.orderNumber.slice(-6)}`,
+            paymentNumber: `PAY-${definition.orderNumber.slice(-8)}`,
             method: definition.paymentMethod,
             amount: money(paidAmount),
             referenceType: PaymentReferenceType.ORDER,
@@ -460,4 +462,45 @@ async function seedExpenses(users: SeededUsers): Promise<void> {
       });
     });
   }
+}
+
+/**
+ * Moves the document sequences past the numbers this seed wrote by hand.
+ *
+ * Seeded orders carry fixed numbers so the seed can be re-run without
+ * duplicating them, which means the sequences know nothing about them. Without
+ * this the first real sale would be issued a number already sitting on a
+ * seeded receipt.
+ *
+ * `GREATEST` keeps it idempotent and never winds a sequence backwards, which
+ * matters when the seed is re-run against a database that has since traded.
+ */
+async function advanceDocumentSequences(): Promise<void> {
+  // Payments are numbered from the order they settle, so they reach as high as
+  // the orders do.
+  const highestOrder = Math.max(...ORDERS.map((order) => documentSerial(order.orderNumber)));
+  const highestRepair = Math.max(...REPAIRS.map((repair) => documentSerial(repair.repairNumber)));
+
+  const reached: [sequence: string, highest: number][] = [
+    [DOCUMENT_SEQUENCES.ORDER.sequence, highestOrder],
+    [DOCUMENT_SEQUENCES.PAYMENT.sequence, highestOrder],
+    [DOCUMENT_SEQUENCES.REPAIR.sequence, highestRepair],
+  ];
+
+  for (const [sequence, highest] of reached) {
+    await prisma.$executeRaw`
+      SELECT setval(
+        ${sequence}::regclass,
+        GREATEST(
+          COALESCE((SELECT last_value FROM pg_sequences WHERE schemaname = current_schema() AND sequencename = ${sequence}), 0),
+          ${highest}
+        )
+      )
+    `;
+  }
+}
+
+/** The numeric tail of a document number: `ORD-00000006` is the sixth order. */
+function documentSerial(documentNumber: string): number {
+  return Number.parseInt(documentNumber.slice(documentNumber.indexOf('-') + 1), 10);
 }

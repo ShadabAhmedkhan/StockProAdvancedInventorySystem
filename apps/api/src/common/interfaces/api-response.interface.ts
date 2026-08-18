@@ -1,9 +1,16 @@
 import type { ErrorCode } from '../enums/error-code.enum';
 
-/** Metadata attached to every successful response. */
+/**
+ * Metadata attached to every successful response. List endpoints add the
+ * pagination fields; single-resource endpoints carry correlation data only.
+ */
 export interface ResponseMeta {
   requestId: string;
   timestamp: string;
+  page?: number;
+  limit?: number;
+  total?: number;
+  totalPages?: number;
 }
 
 /** Envelope for every successful response: `{ data, meta }`. */

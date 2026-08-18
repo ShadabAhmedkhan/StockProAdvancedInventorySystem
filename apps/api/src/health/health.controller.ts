@@ -1,6 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
+import { Public } from '../common/decorators/public.decorator';
 import { HealthCheck, HealthCheckService, MemoryHealthIndicator, PrismaHealthIndicator, type HealthCheckResult } from '@nestjs/terminus';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -17,7 +18,11 @@ export interface LivenessResult {
   timestamp: string;
 }
 
-/** Probes are exempt from rate limiting: an orchestrator must never be throttled out. */
+/**
+ * Probes are unauthenticated and exempt from rate limiting: an orchestrator
+ * has no credentials and must never be throttled out of checking liveness.
+ */
+@Public()
 @SkipThrottle()
 @ApiTags('Health')
 @Controller('health')

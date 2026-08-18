@@ -22,10 +22,18 @@ stock-pro/
 ├── apps/
 │   ├── api/                  NestJS REST API (TypeScript, Prisma, PostgreSQL)
 │   │   ├── prisma/           schema.prisma, migrations, seed
-│   │   ├── src/common/       Filters, interceptors, middleware, error codes
+│   │   ├── src/auth/         Registration, login, refresh rotation, logout
+│   │   ├── src/common/       Guards, decorators, filters, interceptors, pagination
 │   │   ├── src/config/       Environment validation and typed app config
+│   │   ├── src/brands/       Brand CRUD
+│   │   ├── src/categories/   Category CRUD
+│   │   ├── src/customers/    Customer CRUD with soft delete
+│   │   ├── src/products/     Product catalogue
+│   │   ├── src/stock/        Inventory levels and the movement ledger
+│   │   ├── src/suppliers/    Supplier CRUD with soft delete
 │   │   ├── src/health/       Liveness and readiness probes
 │   │   ├── src/prisma/       PrismaService and the global PrismaModule
+│   │   ├── src/users/        User administration and RBAC
 │   │   └── test/             End-to-end and database integration suites
 │   └── web/                  Next.js App Router admin dashboard                -> Phase 14
 ├── packages/
@@ -261,6 +269,560 @@ server log line for that request.
 
 ---
 
+## Authentication
+
+| Endpoint                     | Auth           | Purpose                                      |
+| ---------------------------- | -------------- | -------------------------------------------- |
+| `POST /api/v1/auth/register` | public         | Create an account and sign in                |
+| `POST /api/v1/auth/login`    | public         | Sign in                                      |
+| `POST /api/v1/auth/refresh`  | refresh cookie | Rotate the session, issue a new access token |
+| `POST /api/v1/auth/logout`   | refresh cookie | Revoke the session                           |
+| `GET /api/v1/auth/me`        | access token   | The signed-in user, read fresh               |
+
+### Token strategy
+
+The access token is a short-lived (15 minute) JWT returned **in the response body** for
+the client to hold in memory. The refresh token is an opaque random value delivered
+**only as an httpOnly cookie**, so no long-lived credential is ever reachable from
+JavaScript and nothing is put in `localStorage`.
+
+The cookie is `HttpOnly`, `SameSite=Lax` in development and `SameSite=None; Secure` in
+production, and is scoped to `Path=/api/v1/auth` so it is not attached to ordinary API
+calls.
+
+Refresh tokens are **rotated on every use** and only their SHA-256 digest is stored. A
+fast digest is the right choice here rather than Argon2: the token is already 384 bits of
+uniform randomness, so key stretching protects against nothing, and a salted hash could
+not be looked up by value.
+
+**Reuse detection.** A refresh token works exactly once. Presenting one that has already
+been rotated means the value leaked, so every session for that user is revoked - locking
+out the attacker and forcing the legitimate holder to sign in again.
+
+### Authorisation
+
+Authentication is **on by default**: a global guard protects every route, and exposing an
+endpoint requires an explicit `@Public()`. Forgetting a guard therefore fails closed.
+`@Roles(...)` restricts a route further; a route without it is open to any authenticated
+caller.
+
+Roles are `ADMIN`, `MANAGER`, `STAFF` and `TECHNICIAN`. The access token carries the role,
+so authorisation costs no database round trip; the trade-off is that a role change takes
+effect on the next token refresh, within the 15-minute access-token lifetime. Deactivating
+a user is immediate: it revokes their refresh tokens, and `GET /auth/me` re-reads status.
+
+### Registration policy
+
+`POST /auth/register` is public, but a self-registration can never mint privileges: the
+**first** account on an empty database becomes the `ADMIN`, which is how a fresh
+deployment is bootstrapped, and every later self-registration is created as `STAFF`.
+Elevated roles are granted by an administrator through `POST /api/v1/users`.
+
+### Other protections
+
+- Argon2id password hashing with OWASP parameters (19 MiB, 2 iterations, 1 lane).
+- A wrong password and an unknown email return the identical error, and a candidate
+  password is hashed even when the account does not exist so the two paths cost the same
+  and cannot be told apart by timing.
+- Login is limited to 5 attempts per minute, registration to 10, refresh to 30 - well
+  below the global allowance.
+- `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` are validated at startup: both required,
+  minimum 32 characters, and they must differ.
+- Password hashes are excluded by explicit `select`, so a future model change cannot leak
+  one into a response.
+
+### Users
+
+`GET /api/v1/users` supports pagination, search across name and email, filters on role and
+status, and sorting restricted to a **whitelist** of columns - an open column name would
+let a caller order by `passwordHash`.
+
+There is deliberately no `DELETE /users/:id`. Users are referenced by stock movements,
+orders and every other ledger under `ON DELETE RESTRICT` so history stays attributable;
+`PATCH /users/:id/status` is how access is removed. An administrator cannot change their
+own role or status, and the last active administrator cannot be demoted or deactivated.
+
+---
+
+## Customers
+
+| Endpoint                             | Roles                  |
+| ------------------------------------ | ---------------------- |
+| `GET /api/v1/customers`              | any authenticated user |
+| `GET /api/v1/customers/:id`          | any authenticated user |
+| `POST /api/v1/customers`             | ADMIN, MANAGER, STAFF  |
+| `PATCH /api/v1/customers/:id`        | ADMIN, MANAGER, STAFF  |
+| `DELETE /api/v1/customers/:id`       | ADMIN, MANAGER         |
+| `POST /api/v1/customers/:id/restore` | ADMIN, MANAGER         |
+
+Reads are open to every role because a technician working a repair needs the customer's
+contact details; writing is limited to the roles that serve customers, and removal to the
+roles that answer for it.
+
+**Codes are supplied by the business**, not generated, in the same way a SKU or a supplier
+code is - `customerCode` must look like `CUS-0001` and is uppercased on the way in so
+`cus-1` and `CUS-1` cannot become two customers. Document numbers for _transactions_
+(orders, repairs, returns) are a different matter and are generated server-side from
+Phase 8.
+
+**Delete is soft.** Customers are referenced by orders, repairs and returns under
+`ON DELETE RESTRICT`, so removing the row would either fail or destroy the history that
+points at it. `DELETE` stamps `deletedAt`, which hides the customer from reads and lists;
+`includeDeleted=true` reveals them and `POST /:id/restore` brings one back. Because the
+unique index still covers deleted rows, reusing a deleted customer's code returns a
+conflict that says so, rather than a bare 409.
+
+### Query parameters
+
+Shared by every list endpoint: `page`, `limit` (max 100), `sortOrder`, `search`. Customers
+add `sortBy` (whitelisted to `createdAt`, `updatedAt`, `customerCode`, `firstName`,
+`lastName`, `phone`, `email`), `includeDeleted`, `createdFrom` and `createdTo`.
+
+`search` splits on whitespace and requires **every** term to match somewhere across code,
+first name, last name, phone and email - so `Leila Farouk` finds a person whose name spans
+two columns, while a single term still matches a code or a phone number.
+
+---
+
+## Suppliers
+
+| Endpoint                             | Roles                  |
+| ------------------------------------ | ---------------------- |
+| `GET /api/v1/suppliers`              | any authenticated user |
+| `GET /api/v1/suppliers/:id`          | any authenticated user |
+| `POST /api/v1/suppliers`             | ADMIN, MANAGER         |
+| `PATCH /api/v1/suppliers/:id`        | ADMIN, MANAGER         |
+| `DELETE /api/v1/suppliers/:id`       | ADMIN, MANAGER         |
+| `POST /api/v1/suppliers/:id/restore` | ADMIN, MANAGER         |
+
+Suppliers work like customers - business-chosen `SUP-0001` codes, soft delete with restore,
+multi-term search, `includeDeleted`, date-range filtering and whitelisted sorting (`createdAt`,
+`updatedAt`, `supplierCode`, `name`, `contactPerson`, `phone`, `email`), searching across
+code, name, contact person, phone and email.
+
+**Writing is narrower than for customers.** Staff can read a supplier, because receiving a
+delivery needs the contact details, but only ADMIN and MANAGER can create or change one:
+a customer arrives at the counter and is entered by whoever serves them, whereas a supplier
+is purchasing master data.
+
+Soft delete matters here for a different reason than customers: a supplier is the
+provenance of stock already on the shelves, so the record has to stay readable even once
+the business stops buying from them.
+
+---
+
+## Product catalogue
+
+| Endpoint                                           | Roles                  |
+| -------------------------------------------------- | ---------------------- |
+| `GET /api/v1/categories`, `/brands`, `/products`   | any authenticated user |
+| `GET /api/v1/products/barcode/:barcode`            | any authenticated user |
+| `POST`, `PATCH`, `DELETE`, `/restore` on all three | ADMIN, MANAGER         |
+
+Everyone may read the catalogue - selling and repairing both need it. Only ADMIN and
+MANAGER may change it, because a product record carries the cost and selling price.
+
+### Money
+
+Monetary values are **exact decimal strings end to end**. A price is validated as a string
+matching at most two decimal places, passed as a string to Prisma, stored as
+`Decimal(14, 2)`, and returned as a fixed two-decimal string:
+
+```json
+{ "sku": "ACC-GLS-UNIV", "costPrice": "1.05", "sellingPrice": "7.50" }
+```
+
+A JSON number is accepted on input for convenience and converted immediately, but no
+monetary value is ever produced by floating-point arithmetic. Prisma's `Decimal` already
+serialises to a string; `serialiseDecimalsAsFixedStrings()` pins the scale so `429.00`
+does not reach a client as `"429"` while `1.05` arrives as `"1.05"`.
+
+### Slugs
+
+Categories and brands have a slug derived from the name when one is not supplied
+(`Spare Parts` → `spare-parts`, `Café` → `cafe`). A supplied slug is lower-cased and
+validated. **Renaming does not re-derive the slug** - it is a URL identifier, and silently
+changing it would break every link already pointing at the category. Pass `slug` explicitly
+to change it. A name that yields no slug at all is a 400 asking for one, rather than a
+silently stored empty unique key.
+
+### Catalogue integrity
+
+- **Creating a product creates its inventory row** in the same transaction, at quantity
+  zero and with no stock movement - nothing has moved, and the ledger records movements,
+  not the act of listing a product. Every product therefore has an inventory row from the
+  moment it exists.
+- **A category or brand cannot be deleted while live products use it.** The response says
+  how many. `Product.categoryId` is `ON DELETE RESTRICT` and required, so hiding a
+  referenced category would leave live products pointing at something no list returns.
+- **A product cannot be deleted while it holds stock.** Those units are physically on a
+  shelf; hiding the product would strand them and stop the ledger reconciling.
+- Category, brand and stock level are loaded **with** a page of products rather than per
+  row, so a page costs a fixed number of queries however long it is.
+
+### Query parameters
+
+Products add `sortBy` (`createdAt`, `updatedAt`, `sku`, `name`, `costPrice`,
+`sellingPrice`, `minimumStock`), `categoryId`, `brandId`, `isActive`, `includeDeleted`,
+`minPrice`, `maxPrice`, `createdFrom` and `createdTo`, searching across SKU, barcode, name
+and description. Categories and brands default to `name` ascending, which is what a picker
+needs.
+
+---
+
+## Stock
+
+| Endpoint                       | Roles                  |
+| ------------------------------ | ---------------------- |
+| `GET /api/v1/stock`            | any authenticated user |
+| `GET /api/v1/stock/:productId` | any authenticated user |
+| `GET /api/v1/stock/summary`    | any authenticated user |
+| `GET /api/v1/stock/movements`  | any authenticated user |
+| `POST /api/v1/stock/adjust`    | ADMIN, MANAGER         |
+
+Everyone may read stock levels - selling, repairing and reordering all need them. Manual
+movements are ADMIN/MANAGER only: an adjustment is the one place stock can be created or
+destroyed **without a source document**, which makes it the control point. Staff move stock
+through orders, repairs and returns, each of which has a document behind it.
+
+### Stock can never move silently
+
+The quantity change and its ledger entry are written in **one transaction**. Stock cannot
+move without a `StockMovement` explaining it, and a movement cannot survive a change that
+rolled back. Every movement records `previousQuantity` and `newQuantity`, so the ledger
+chains: the current level is always reconstructable from history, and the tests assert that
+reconciliation after concurrent traffic.
+
+Only `PURCHASE`, `ADJUSTMENT_IN` and `ADJUSTMENT_OUT` can be posted by hand. `SALE`,
+`RETURN_IN`, `RETURN_OUT`, `REPAIR_IN` and `REPAIR_OUT` are produced by their own
+workflows against real documents - accepting them here would let the ledger claim a sale
+that never happened.
+
+### Concurrency
+
+The change is a **single conditional UPDATE**, never a read in JavaScript followed by a
+write:
+
+```sql
+UPDATE "Inventory"
+SET "quantity" = "quantity" + $delta, "updatedAt" = NOW()
+WHERE "productId" = $id AND "quantity" + $delta >= "reservedQuantity"
+```
+
+Two people selling the last unit would both pass a JavaScript check and both write. Here the
+second statement blocks on the row lock, then re-evaluates its `WHERE` against the value the
+first one committed, and matches no rows - so it is rejected with a 409 naming what is
+actually available. The one guard covers both rules at once: stock cannot go negative, and
+it cannot drop below what is already reserved for an order.
+
+The database is the arbiter, with the `Inventory_quantity_non_negative` and
+`Inventory_reserved_within_quantity` check constraints as the backstop behind it.
+`test/stock-concurrency.e2e-spec.ts` fires genuinely simultaneous requests at the real
+database and asserts that exactly as many succeed as there was stock, that the level never
+goes negative, that there is exactly one movement per success and none for a rejection, and
+that the ledger still reconciles.
+
+### Low and out of stock
+
+`stockStatus` filters the listing to `OUT` (empty), `LOW` (at or below the product's own
+minimum, but not empty), `OK`, or `ALL`. The two are separate because they call for
+different action: one is a reorder, the other is a lost sale.
+
+That filter compares `Inventory.quantity` against `Product.minimumStock` - two columns in
+two tables - which no ORM filter API can express, so the stock listing is written as
+parameterised SQL. Filtering in JavaScript instead would mean fetching every product to
+answer one page and would make `meta.total` a lie. Values are always bound parameters; the
+`ORDER BY` fragment comes from a fixed lookup table keyed by an already-validated field
+name, and a search term containing SQL is matched literally (there is a test for that).
+
+`GET /stock/summary` returns product and unit counts, low and out-of-stock counts, and the
+inventory valued at cost and at retail - all computed in the database, so the valuation is
+exact `numeric` arithmetic rather than summed floats.
+
+---
+
+## Orders
+
+| Endpoint                                  | Roles                  |
+| ----------------------------------------- | ---------------------- |
+| `GET /api/v1/orders`                      | any authenticated user |
+| `GET /api/v1/orders/:id`                  | any authenticated user |
+| `GET /api/v1/orders/:id/payments`         | any authenticated user |
+| `POST /api/v1/orders`                     | ADMIN, MANAGER, STAFF  |
+| `PATCH /api/v1/orders/:id`                | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/orders/:id/items`           | ADMIN, MANAGER, STAFF  |
+| `PATCH /api/v1/orders/:id/items/:itemId`  | ADMIN, MANAGER, STAFF  |
+| `DELETE /api/v1/orders/:id/items/:itemId` | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/orders/:id/confirm`         | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/orders/:id/complete`        | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/orders/:id/cancel`          | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/orders/:id/payments`        | ADMIN, MANAGER, STAFF  |
+
+Anyone signed in may read orders - a technician checking what a customer bought needs them.
+Technicians cannot sell; their work goes through repairs.
+
+### The lifecycle
+
+```text
+  DRAFT ---confirm--> CONFIRMED ---complete--> COMPLETED
+    |                     |
+    +------cancel---------+-------> CANCELLED
+```
+
+A **draft** is a basket: lines come and go, nothing is promised, and no stock is touched.
+**Confirming** reserves the stock, which is the moment those units stop being available to
+anyone else, and freezes the lines - an agreed price cannot move afterwards. **Completing**
+hands the goods over: the quantity leaves the shelf and a `SALE` movement records why. A
+completed order is final - goods come back through a return, never by editing history.
+
+There is no direct `DRAFT -> COMPLETED` shortcut. Reservation is the whole point of the
+confirmed state, and skipping it would mean a sale that never held the stock it sold.
+
+### Reservation, not deduction
+
+Confirming raises `Inventory.reservedQuantity`; it does **not** lower `quantity`. The units
+are still on the shelf, merely promised. That is why confirmation writes no `StockMovement`:
+the ledger records changes to what is actually on hand, and nothing has moved yet.
+
+Completion lowers `quantity` and `reservedQuantity` together, in one statement, which is
+what keeps the `Inventory_reserved_within_quantity` constraint satisfied at every instant.
+Cancelling a confirmed order gives the reservation back and, again, writes no movement -
+nothing ever left.
+
+A manual `ADJUSTMENT_OUT` cannot take units an order has reserved: the stock guard is
+`quantity + delta >= reservedQuantity`, so reserved stock is protected from every other
+caller, not just from other orders.
+
+### Concurrency
+
+Every state change is a **conditional UPDATE**, never a read in JavaScript followed by a
+write:
+
+```sql
+-- the transition, which also takes the order's row lock
+UPDATE "Order" SET "status" = 'CONFIRMED' WHERE "id" = $1 AND "status" = 'DRAFT';
+
+-- the reservation
+UPDATE "Inventory" SET "reservedQuantity" = "reservedQuantity" + $1
+WHERE "productId" = $2 AND "quantity" - "reservedQuantity" >= $1;
+
+-- the payment
+UPDATE "Order" SET "paidAmount" = "paidAmount" + $1
+WHERE "id" = $2 AND "paidAmount" + $1 <= "total";
+```
+
+Two simultaneous confirmations of the same order cannot both succeed: the second blocks on
+the row lock, re-evaluates its `WHERE` against the committed value, and matches nothing.
+Draft edits take that same lock first, so a line cannot slip in beside a confirmation that
+is already under way. Two cashiers taking payment at once cannot together collect more than
+the total.
+
+Inventory rows are always locked **in product order**, sorted by `productId`, so two orders
+holding the same two products cannot take the two locks in opposite directions and deadlock.
+The comparison is plain code-unit ordering rather than `localeCompare`, which follows the
+runtime's locale and could disagree between servers.
+
+The concurrency suite proves each of these against the real database rather than asserting
+them: 30 orders against 20 units confirm exactly 20 times, a double completion ships once
+and writes one movement, and 10 simultaneous payments against a 50.00 order accept exactly
+five of ten.
+
+### Money
+
+Every amount is a `Prisma.Decimal` from the request body to the column - exact base-ten
+arithmetic, never a binary float. The rules live in `order-totals.ts` as pure functions with
+no database client, so what a receipt depends on can be tested directly:
+
+```text
+line total  = unitPrice x quantity - line discount
+subtotal    = sum of line totals
+order total = subtotal - order discount + tax
+outstanding = total - paidAmount
+```
+
+`unitPrice` defaults to the product's current selling price and is **copied onto the line**,
+so a later catalogue change cannot rewrite what a customer was charged. An override is
+allowed because shops negotiate.
+
+Totals are always recomputed from the lines actually in the database, so a total can never
+drift from what it is the sum of. A discount larger than the thing it discounts is rejected
+(422) - including when removing a line would strand an order-level discount above the new
+subtotal, which says so rather than silently reducing it.
+
+`tax` is an amount rather than a rate because there is nowhere to store a rate; a
+configurable default belongs with the settings work in Phase 13.
+
+Payments are only accepted against a `CONFIRMED` or `COMPLETED` order - nothing has been
+agreed on a draft - and overpayment is refused. `paymentStatus` is derived from the amounts;
+`REFUNDED` is never inferred here, because money only travels back out through a return.
+An order with a payment recorded against it cannot be cancelled: it needs a refund, which is
+the returns and finance workflow's job.
+
+### Document numbers
+
+`orderNumber` and `paymentNumber` are drawn from PostgreSQL sequences (`ORD-00000042`).
+They are printed on receipts, so they cannot be uuids, and they cannot come from
+`MAX(number) + 1` - two tills ringing up a sale in the same instant would read the same
+maximum and choose the same number.
+
+Sequences are non-transactional by design, so a rolled-back sale consumes its number and
+leaves a gap. That is the accepted trade-off: a gapless counter would serialise every sale
+behind a single row lock. The numbers stay unique and monotonic either way.
+
+The seed writes fixed numbers so it can be re-run without duplicating orders, then advances
+both sequences past them, so the first real sale on a freshly seeded database is
+`ORD-00000007` rather than a number already on a seeded receipt.
+
+### Query parameters
+
+`status`, `paymentStatus`, `customerId`, `createdById`, `createdFrom` / `createdTo`,
+`completedFrom` / `completedTo`, and `search` across `orderNumber` and `notes`. Customers
+are found by `customerId` rather than by name here: reaching across the relation would turn
+every order search into a join over the whole customer table.
+
+`completedAt` is filtered separately from `createdAt` because revenue keys off when a sale
+actually closed - a draft raised last month must not distort today's figures.
+
+Sorting is restricted to `createdAt`, `completedAt`, `orderNumber`, `total` and `status`.
+
+---
+
+## Repairs
+
+| Endpoint                                   | Roles                      |
+| ------------------------------------------ | -------------------------- |
+| `GET /api/v1/repairs`                      | any authenticated user     |
+| `GET /api/v1/repairs/:id`                  | any authenticated user     |
+| `GET /api/v1/repairs/:id/history`          | any authenticated user     |
+| `GET /api/v1/repairs/:id/payments`         | any authenticated user     |
+| `POST /api/v1/repairs/:id/status`          | any authenticated user     |
+| `POST /api/v1/repairs`                     | ADMIN, MANAGER, STAFF      |
+| `POST /api/v1/repairs/:id/payments`        | ADMIN, MANAGER, STAFF      |
+| `PATCH /api/v1/repairs/:id`                | ADMIN, MANAGER, TECHNICIAN |
+| `POST /api/v1/repairs/:id/items`           | ADMIN, MANAGER, TECHNICIAN |
+| `PATCH /api/v1/repairs/:id/items/:itemId`  | ADMIN, MANAGER, TECHNICIAN |
+| `DELETE /api/v1/repairs/:id/items/:itemId` | ADMIN, MANAGER, TECHNICIAN |
+
+Reading is open to everyone: the counter needs to answer "is it ready yet?" as much as the
+bench does. Intake and payment belong to the front desk; diagnosis, costs and parts to the
+people qualified to fit them. Moving a repair along is open to any signed-in user, because
+the counter hands devices back and the bench does the work - and every move is recorded
+with the name of whoever made it.
+
+### The workflow
+
+```text
+  RECEIVED -> DIAGNOSING -> WAITING_APPROVAL -> APPROVED -> IN_PROGRESS -> COMPLETED -> DELIVERED
+                   |                                |          |    ^
+                   +-- straight to APPROVED when    |          v    |
+                       the fault is obvious         +----> WAITING_PARTS
+
+  every unfinished status -> CANCELLED
+```
+
+The workflow is a **map of what may follow what**, not a chain of `if`s, so it can be read
+in one place and an illegal move is refused by the same rule wherever it is attempted. Two
+statuses are terminal: a `DELIVERED` repair has gone home and a `CANCELLED` one is
+abandoned. Neither may move again, because the alternative is a device that has left the
+shop being quietly put back into progress.
+
+`COMPLETED` is closed to further changes even though it can still be delivered: its parts
+have already left stock, so editing them afterwards would put the ledger and the device out
+of step.
+
+### Status history is the repair's audit trail
+
+Every move writes a `RepairStatusHistory` row carrying **from, to, when, who and why** - in
+the same transaction as the status change, so a refused move leaves no trace of a change it
+never made. Intake writes the first row with `fromStatus` null: the device came from outside
+the workflow, so there is no status it moved out of.
+
+### Parts
+
+A part behaves the way a line on an order does:
+
+| Action              | Stock effect                                 | Ledger       |
+| ------------------- | -------------------------------------------- | ------------ |
+| Fitting a part      | reserves it                                  | nothing yet  |
+| Changing a quantity | reserves or releases **only the difference** | nothing yet  |
+| Taking a part off   | releases it                                  | nothing      |
+| Completing the job  | quantity and reservation fall together       | `REPAIR_OUT` |
+| Cancelling the job  | releases it                                  | nothing      |
+
+The units stay on the shelf until the repair is finished, which is the only point at which
+anyone can say for certain that they were used - but they are reserved from the moment they
+are promised to a device, so a part on the bench cannot be sold from under it. A manual
+`ADJUSTMENT_OUT` cannot take them either, and neither can an order: sales and repairs
+compete for the same units through the same guard, and there is a test for exactly that.
+
+The stock operations themselves are shared with orders rather than reimplemented - see
+[Concurrency](#concurrency-1).
+
+### Money
+
+`finalCost` is what the shop charges and **a repair cannot be completed until it is set**
+(422 if it is not). It is never inferred from the parts: a repair is priced on labour,
+diagnosis and goodwill as much as on components. `partsTotal` is reported alongside it for
+information, computed as an exact decimal.
+
+A repair has no `paidAmount` column, so what has been collected is the sum of its payments,
+and `outstanding` is `finalCost - paidAmount`. Until the repair is priced, `outstanding` is
+**null** rather than zero: what is owed is not yet known, and saying "nothing" would be a
+different claim.
+
+Payments are only accepted once a repair is `COMPLETED` or `DELIVERED`, and overpayment is
+refused. Because there is no counter column to increment atomically, the guard takes the
+repair's row lock with `SELECT ... FOR UPDATE` before adding the payments up; every writer
+passes through that lock, so no payment can land between the total being read and the new
+row being written. Ten simultaneous payments against a 50.00 job accept exactly five.
+
+### Concurrency
+
+Every state change is a conditional `UPDATE` on the repair row:
+
+```sql
+UPDATE "Repair" SET "status" = 'COMPLETED', "completedAt" = NOW()
+WHERE "id" = $1 AND "status" = 'IN_PROGRESS';
+```
+
+The transition is checked against the map first, then applied conditionally, so a status
+read a moment ago cannot be acted on after somebody else has moved it - the second request
+gets a conflict telling it to reload. Part edits take the same lock and assert the repair is
+still open, so a part cannot be fitted beside a completion already under way.
+
+Inventory rows are locked in product order, so two repairs holding the same two parts cannot
+deadlock. Ten repairs fitted with the same pair of parts in opposite orders and completed
+simultaneously all succeed.
+
+### Assignment
+
+A repair can only be assigned to an **active** user whose role is `TECHNICIAN`, `ADMIN` or
+`MANAGER`. Handing work to a deactivated account, or to a salesperson, leaves a job nobody
+is actually looking at.
+
+### Query parameters
+
+`status`, `deviceType`, `customerId`, `technicianId`, `receivedFrom` / `receivedTo`,
+`completedFrom` / `completedTo`, plus three shortcuts for the questions a shop actually
+asks:
+
+- **`openOnly`** - work still on the bench, without listing six statuses.
+- **`overdue`** - promised date gone by and not finished.
+- **`unassigned`** - nobody has picked it up.
+
+Where a shortcut and an explicit filter overlap, the explicit one wins: `technicianId` beats
+`unassigned`, and `status` beats `openOnly`.
+
+Search covers `repairNumber`, `serialNumber`, `imei`, `brand`, `model` and
+`problemDescription` - serial and IMEI because a customer who has lost their ticket is
+identified by the device in their hand. Both are upper-cased on the way in so a device is
+found however it was typed.
+
+Sorting is restricted to `receivedAt`, `completedAt`, `expectedCompletionAt`,
+`repairNumber`, `status` and `createdAt`.
+
+---
+
 ## Build status
 
 Delivered so far:
@@ -278,19 +840,61 @@ Delivered so far:
   Argon2id password hashing, a re-runnable development seed, and a database readiness
   indicator on `/api/v1/health`. Covered by an integration suite that asserts the
   invariants against the real server.
+- **Phase 3 — Authentication and users.** Registration, login, rotating refresh tokens with
+  reuse detection, logout, `GET /auth/me`, global authentication and role guards,
+  `@Public()` / `@Roles()` / `@CurrentUser()`, credential rate limiting, and the
+  `/api/v1/users` administration API with pagination, search, filters and whitelisted
+  sorting. See [Authentication](#authentication).
+- **Phase 4 — Customers.** Full CRUD with role-scoped access, soft delete and restore,
+  multi-term search, date-range filtering and whitelisted sorting. See
+  [Customers](#customers).
+- **Phase 5 — Suppliers.** The same surface with narrower write permissions, plus the
+  shared search, code-format and normalisation helpers both modules now use. See
+  [Suppliers](#suppliers).
+- **Phase 6 — Product catalogue.** Categories, brands and products with slug derivation,
+  exact decimal money, barcode lookup, price-range and relation filters, and the
+  integrity rules that keep the catalogue and the stock ledger consistent. See
+  [Product catalogue](#product-catalogue).
+- **Phase 7 — Stock.** Inventory levels, the movement ledger, transactional adjustments
+  with a conditional UPDATE that survives concurrent withdrawals, low/out-of-stock
+  filtering in SQL, and database-computed valuation. See [Stock](#stock).
+- **Phase 8 — Orders.** The draft/confirmed/completed/cancelled lifecycle, order lines and
+  exact-decimal totals, stock reservation on confirmation and deduction on completion,
+  order payments with overpayment refused, and sequence-backed document numbers. Every
+  transition and every money movement is a conditional UPDATE, proven against the real
+  database by a dedicated concurrency suite. See [Orders](#orders).
+
+- **Phase 9 — Repairs.** The nine-status workflow as a transition map, status history as
+  the repair's own audit trail, parts that reserve stock when fitted and consume it on
+  completion, repair payments guarded by a row lock, and a workbench listing with
+  open/overdue/unassigned filters. The reservation machinery is now shared with orders
+  rather than duplicated. See [Repairs](#repairs).
 
 Not yet implemented (each is scheduled work, not a stub):
 
-authentication (Phase 3) · customers (4) · suppliers (5) · product catalog (6) ·
-inventory (7) · orders (8) · repairs (9) · returns (10) · finance (11) · dashboard and
-reports (12) · audit and settings (13) · `apps/web` (14) and all UI phases (15-23) ·
-full E2E suite (24) · performance and security review (25) · production build (26).
+returns (Phase 10) · finance (11) · dashboard and reports (12) ·
+audit and settings (13) · `apps/web` (14) and all UI phases (15-23) · full E2E suite (24) ·
+performance and security review (25) · production build (26).
 
-The tables exist and are constrained, but only the health endpoints are exposed so far;
-each business module lands in the phase listed above.
+A few items are deliberately deferred rather than half-built, each to the phase that owns
+it:
+
+- No password-change or password-reset endpoint yet.
+- Nothing is written to `AuditLog` - the audit service lands in Phase 13, which is where
+  those call sites are added. The `StockMovement` ledger already records who moved stock,
+  what moved, and against which document, so the trail for stock and sales is not blank in
+  the meantime.
+- Order and repair payments do not yet write a `FinancialTransaction`; that ledger and the
+  summaries built on it are Phase 11.
+- An order with a payment recorded against it cannot be cancelled, because refunding it
+  needs the returns (Phase 10) and finance (Phase 11) workflows. The refusal is explicit
+  and explains itself rather than fabricating a refund that never happened.
+- `Order.paymentStatus` never becomes `REFUNDED` here; only a return sets it.
+- A repair has no warranty or rework flow: a device that comes back is taken in again as a
+  new repair. The schema has nowhere to record the link, and inventing one would be
+  guessing at a rule the specification does not state.
 
 `packages/shared-types`, `packages/validation` and `apps/web` are reserved placeholders
 containing only a `.gitkeep`; they become real workspace packages in Phases 21, 20 and 14.
-`DATABASE_URL` is validated on startup. The JWT secrets appear in `.env.example` but are
-not yet in the environment schema; they are added in Phase 3, and from that point the API
-refuses to boot without them.
+`DATABASE_URL` and both JWT secrets are validated on startup; the API refuses to boot
+without them.

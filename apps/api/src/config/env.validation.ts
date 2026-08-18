@@ -1,5 +1,5 @@
 import { Type, plainToInstance } from 'class-transformer';
-import { IsEnum, IsIn, IsInt, IsOptional, IsUrl, Matches, Max, Min, validateSync } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsUrl, Matches, Max, Min, MinLength, validateSync } from 'class-validator';
 
 export enum NodeEnvironment {
   Development = 'development',
@@ -9,6 +9,16 @@ export enum NodeEnvironment {
 
 /** Comma-separated list of absolute http(s) origins, e.g. `http://a.test,https://b.test`. */
 const ORIGIN_LIST = /^https?:\/\/[^\s,/]+(?::\d{1,5})?(?:,https?:\/\/[^\s,/]+(?::\d{1,5})?)*$/;
+
+/** A token lifetime such as `15m`, `24h` or `7d`. */
+const DURATION = /^\d+[smhd]$/;
+
+/**
+ * Shortest secret accepted. An HS256 key shorter than the 256-bit digest adds
+ * no security over one that length, and a human-typed passphrase below this
+ * is guessable.
+ */
+const MIN_SECRET_LENGTH = 32;
 
 /**
  * Every environment variable the API reads, with its type and accepted range.
@@ -36,6 +46,20 @@ export class EnvironmentVariables {
     { message: 'DATABASE_URL must be a postgres:// or postgresql:// connection string' },
   )
   DATABASE_URL: string;
+
+  /** Signs short-lived access tokens. No default: a fallback secret is a backdoor. */
+  @MinLength(MIN_SECRET_LENGTH, { message: `JWT_ACCESS_SECRET must be at least ${String(MIN_SECRET_LENGTH)} characters` })
+  JWT_ACCESS_SECRET: string;
+
+  /** Signs long-lived refresh tokens. Must differ from the access secret. */
+  @MinLength(MIN_SECRET_LENGTH, { message: `JWT_REFRESH_SECRET must be at least ${String(MIN_SECRET_LENGTH)} characters` })
+  JWT_REFRESH_SECRET: string;
+
+  @Matches(DURATION, { message: 'JWT_ACCESS_EXPIRES_IN must look like 15m, 24h or 7d' })
+  JWT_ACCESS_EXPIRES_IN = '15m';
+
+  @Matches(DURATION, { message: 'JWT_REFRESH_EXPIRES_IN must look like 15m, 24h or 7d' })
+  JWT_REFRESH_EXPIRES_IN = '7d';
 
   @Matches(ORIGIN_LIST, {
     message: 'WEB_URL must be a comma-separated list of http(s) origins without a trailing slash',
@@ -76,6 +100,13 @@ export function validateEnv(config: Record<string, unknown>): EnvironmentVariabl
   if (errors.length > 0) {
     const details = errors.map((error) => `  ${error.property}: ${Object.values(error.constraints ?? {}).join(', ')}`).join('\n');
     throw new Error(`Invalid environment configuration:\n${details}`);
+  }
+
+  // A cross-field rule class-validator cannot express per property: sharing one
+  // secret between token kinds would let a stolen refresh token be presented as
+  // an access token, defeating the short access-token lifetime entirely.
+  if (validated.JWT_ACCESS_SECRET === validated.JWT_REFRESH_SECRET) {
+    throw new Error('Invalid environment configuration:\n  JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET');
   }
 
   return validated;
