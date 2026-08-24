@@ -14,7 +14,7 @@ describe('validateEnv', () => {
     expect(env.DATABASE_URL).toBe(DATABASE_URL);
     expect(env.NODE_ENV).toBe(NodeEnvironment.Development);
     expect(env.API_PORT).toBe(4000);
-    expect(env.WEB_URL).toBe('http://localhost:3000');
+    expect(env.WEB_URL).toBe('http://localhost:3001');
     expect(env.THROTTLE_TTL).toBe(60);
     expect(env.THROTTLE_LIMIT).toBe(100);
     expect(env.JWT_ACCESS_EXPIRES_IN).toBe('15m');
@@ -31,9 +31,9 @@ describe('validateEnv', () => {
   });
 
   it('accepts a comma-separated origin list', () => {
-    const env = validateEnv({ ...REQUIRED, WEB_URL: 'http://localhost:3000,https://app.stockpro.test' });
+    const env = validateEnv({ ...REQUIRED, WEB_URL: 'http://localhost:3001,https://app.stockpro.test' });
 
-    expect(env.WEB_URL).toBe('http://localhost:3000,https://app.stockpro.test');
+    expect(env.WEB_URL).toBe('http://localhost:3001,https://app.stockpro.test');
   });
 
   it.each([
@@ -41,8 +41,8 @@ describe('validateEnv', () => {
     ['a non-numeric port', { API_PORT: 'not-a-port' }, 'API_PORT'],
     ['a port above the valid range', { API_PORT: '70000' }, 'API_PORT'],
     ['a port below the valid range', { API_PORT: '0' }, 'API_PORT'],
-    ['an origin without a scheme', { WEB_URL: 'localhost:3000' }, 'WEB_URL'],
-    ['an origin with a trailing slash', { WEB_URL: 'http://localhost:3000/' }, 'WEB_URL'],
+    ['an origin without a scheme', { WEB_URL: 'localhost:3001' }, 'WEB_URL'],
+    ['an origin with a trailing slash', { WEB_URL: 'http://localhost:3001/' }, 'WEB_URL'],
     ['a zero throttle window', { THROTTLE_TTL: '0' }, 'THROTTLE_TTL'],
     ['a non-boolean SWAGGER_ENABLED', { SWAGGER_ENABLED: 'yes' }, 'SWAGGER_ENABLED'],
     ['a malformed access token lifetime', { JWT_ACCESS_EXPIRES_IN: '15 minutes' }, 'JWT_ACCESS_EXPIRES_IN'],

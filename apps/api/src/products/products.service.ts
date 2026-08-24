@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { searchAcross } from '../common/pagination/search.util';
 import type { Prisma } from '../generated/prisma/client';
+import { AuditAction, AuditEntity } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateProductDto } from './dto/create-product.dto';
 import type { ProductQueryDto } from './dto/product-query.dto';
@@ -26,7 +28,10 @@ export type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof PR
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findAll(query: ProductQueryDto): Promise<Paginated<ProductWithRelations>> {
     const where = buildWhere(query);
@@ -70,7 +75,7 @@ export class ProductsService {
    * has moved, and the ledger records movements, not the act of listing a
    * product for sale.
    */
-  async create(dto: CreateProductDto): Promise<ProductWithRelations> {
+  async create(dto: CreateProductDto, callerId: string): Promise<ProductWithRelations> {
     await this.assertSkuAvailable(dto.sku);
     await this.assertBarcodeAvailable(dto.barcode);
     await this.assertCategoryExists(dto.categoryId);
@@ -95,13 +100,18 @@ export class ProductsService {
 
       await tx.inventory.create({ data: { productId: product.id, quantity: 0 } });
 
+      await this.auditService.record(
+        { userId: callerId, action: AuditAction.CREATE, entity: AuditEntity.PRODUCT, entityId: product.id, metadata: { sku: dto.sku, name: dto.name } },
+        tx,
+      );
+
       return product;
     });
 
     return this.findOne(created.id);
   }
 
-  async update(id: string, dto: UpdateProductDto): Promise<ProductWithRelations> {
+  async update(id: string, dto: UpdateProductDto, callerId: string): Promise<ProductWithRelations> {
     await this.findOne(id);
 
     if (dto.sku !== undefined) {
@@ -117,20 +127,27 @@ export class ProductsService {
       await this.assertBrandExists(dto.brandId);
     }
 
-    await this.prisma.product.update({
-      where: { id },
-      data: {
-        ...(dto.sku === undefined ? {} : { sku: dto.sku }),
-        ...(dto.barcode === undefined ? {} : { barcode: dto.barcode }),
-        ...(dto.name === undefined ? {} : { name: dto.name }),
-        ...(dto.description === undefined ? {} : { description: dto.description }),
-        ...(dto.categoryId === undefined ? {} : { categoryId: dto.categoryId }),
-        ...(dto.brandId === undefined ? {} : { brandId: dto.brandId }),
-        ...(dto.costPrice === undefined ? {} : { costPrice: dto.costPrice }),
-        ...(dto.sellingPrice === undefined ? {} : { sellingPrice: dto.sellingPrice }),
-        ...(dto.minimumStock === undefined ? {} : { minimumStock: dto.minimumStock }),
-        ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
-      },
+    const data = {
+      ...(dto.sku === undefined ? {} : { sku: dto.sku }),
+      ...(dto.barcode === undefined ? {} : { barcode: dto.barcode }),
+      ...(dto.name === undefined ? {} : { name: dto.name }),
+      ...(dto.description === undefined ? {} : { description: dto.description }),
+      ...(dto.categoryId === undefined ? {} : { categoryId: dto.categoryId }),
+      ...(dto.brandId === undefined ? {} : { brandId: dto.brandId }),
+      ...(dto.costPrice === undefined ? {} : { costPrice: dto.costPrice }),
+      ...(dto.sellingPrice === undefined ? {} : { sellingPrice: dto.sellingPrice }),
+      ...(dto.minimumStock === undefined ? {} : { minimumStock: dto.minimumStock }),
+      ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
+    };
+
+    await this.prisma.product.update({ where: { id }, data });
+
+    await this.auditService.record({
+      userId: callerId,
+      action: AuditAction.UPDATE,
+      entity: AuditEntity.PRODUCT,
+      entityId: id,
+      metadata: { changed: Object.keys(data) },
     });
 
     return this.findOne(id);
@@ -143,7 +160,7 @@ export class ProductsService {
    * physically on a shelf but no longer visible to any report, and the ledger
    * would no longer reconcile against the inventory table.
    */
-  async remove(id: string): Promise<ProductWithRelations> {
+  async remove(id: string, callerId: string): Promise<ProductWithRelations> {
     const product = await this.findOne(id);
     const onHand = product.inventory?.quantity ?? 0;
 
@@ -155,6 +172,8 @@ export class ProductsService {
     }
 
     await this.prisma.product.update({ where: { id }, data: { deletedAt: new Date() } });
+
+    await this.auditService.record({ userId: callerId, action: AuditAction.DELETE, entity: AuditEntity.PRODUCT, entityId: id, metadata: { sku: product.sku } });
 
     return this.findOne(id, true);
   }

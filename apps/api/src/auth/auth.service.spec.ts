@@ -1,11 +1,12 @@
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import type { JwtConfiguration } from '../config/jwt.config';
 import { jwtConfig } from '../config/jwt.config';
 import { firstCallArg } from '../common/testing/mock-args';
 import { hashPassword } from '../common/utils/password.util';
-import { UserRole, UserStatus } from '../generated/prisma/enums';
+import { AuditAction, UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { RefreshTokenService } from './refresh-token.service';
@@ -58,6 +59,7 @@ describe('AuthService', () => {
   let consume: jest.Mock;
   let revoke: jest.Mock;
   let revokeAllForUser: jest.Mock;
+  let record: jest.Mock;
 
   beforeEach(async () => {
     findUnique = jest.fn();
@@ -68,6 +70,7 @@ describe('AuthService', () => {
     consume = jest.fn();
     revoke = jest.fn();
     revokeAllForUser = jest.fn(() => Promise.resolve(0));
+    record = jest.fn(() => Promise.resolve());
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -75,6 +78,7 @@ describe('AuthService', () => {
         JwtService,
         { provide: PrismaService, useValue: { user: { findUnique, create, update, count } } },
         { provide: RefreshTokenService, useValue: { issue, consume, revoke, revokeAllForUser } },
+        { provide: AuditService, useValue: { record } },
         { provide: jwtConfig.KEY, useValue: config },
       ],
     }).compile();
@@ -167,6 +171,22 @@ describe('AuthService', () => {
       expect((unknownEmail as UnauthorizedException).getResponse()).toEqual((wrongPassword as UnauthorizedException).getResponse());
     });
 
+    it('records a LOGIN entry on success', async () => {
+      findUnique.mockResolvedValue(await storedUser());
+
+      await service.login({ email: 'diego@stockpro.test', password: PASSWORD }, { ipAddress: '10.0.0.1' });
+
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1', action: AuditAction.LOGIN, ipAddress: '10.0.0.1' }));
+    });
+
+    it('records a LOGIN_FAILED entry with no actor for a wrong password', async () => {
+      findUnique.mockResolvedValue(await storedUser());
+
+      await service.login({ email: 'diego@stockpro.test', password: 'WrongPassword1' }, {}).catch(() => undefined);
+
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: null, action: AuditAction.LOGIN_FAILED }));
+    });
+
     it('hashes a candidate password even when the account does not exist', async () => {
       findUnique.mockResolvedValue(null);
 
@@ -233,6 +253,22 @@ describe('AuthService', () => {
     it.each([[undefined], ['']])('is a no-op for %p rather than an error', async (token: string | undefined) => {
       await expect(service.logout(token)).resolves.toBeUndefined();
       expect(revoke).not.toHaveBeenCalled();
+    });
+
+    it('records a LOGOUT entry for the token owner', async () => {
+      revoke.mockResolvedValue('user-1');
+
+      await service.logout('presented', { ipAddress: '10.0.0.1' });
+
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1', action: AuditAction.LOGOUT, ipAddress: '10.0.0.1' }));
+    });
+
+    it('records nothing for a token that was already spent or never existed', async () => {
+      revoke.mockResolvedValue(null);
+
+      await service.logout('presented');
+
+      expect(record).not.toHaveBeenCalled();
     });
   });
 

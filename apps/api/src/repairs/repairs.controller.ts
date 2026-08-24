@@ -70,6 +70,7 @@ export class RepairsController {
     return this.repairsService.update(id, dto);
   }
 
+  @Roles(UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.STAFF)
   @Post(':id/status')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Move the repair along, recording who moved it and why' })

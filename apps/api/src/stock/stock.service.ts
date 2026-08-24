@@ -1,8 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { Prisma } from '../generated/prisma/client';
-import { StockMovementType, StockReferenceType } from '../generated/prisma/enums';
+import { AuditAction, AuditEntity, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AdjustStockDto, ManualMovementType } from './dto/adjust-stock.dto';
 import { StockStatusFilter, type StockQueryDto, type StockSortField } from './dto/stock-query.dto';
@@ -88,7 +89,10 @@ export interface StockAdjustmentResult {
 
 @Injectable()
 export class StockService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   /**
    * Lists stock levels.
@@ -272,6 +276,17 @@ export class StockService {
         },
         select: { id: true },
       });
+
+      await this.auditService.record(
+        {
+          userId,
+          action: AuditAction.STOCK_ADJUSTED,
+          entity: AuditEntity.INVENTORY,
+          entityId: dto.productId,
+          metadata: { type: dto.type, quantity: dto.quantity, previousQuantity: inventory.quantity - delta, newQuantity: inventory.quantity },
+        },
+        tx,
+      );
 
       return {
         productId: dto.productId,

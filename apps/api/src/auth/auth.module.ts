@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { AuditModule } from '../audit/audit.module';
 import { jwtConfig } from '../config/jwt.config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -12,7 +13,7 @@ import { RefreshTokenService } from './refresh-token.service';
  * accepted with the refresh key by omission.
  */
 @Module({
-  imports: [ConfigModule.forFeature(jwtConfig), JwtModule.register({})],
+  imports: [ConfigModule.forFeature(jwtConfig), JwtModule.register({}), AuditModule],
   controllers: [AuthController],
   providers: [AuthService, RefreshTokenService],
   // JwtModule is re-exported because the global JwtAuthGuard is declared in

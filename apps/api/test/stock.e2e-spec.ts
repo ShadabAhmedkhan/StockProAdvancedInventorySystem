@@ -51,6 +51,7 @@ describe('Stock (e2e)', () => {
     label = `ST${context.run.slice(0, 5).toUpperCase()}`;
 
     context.cleanup.push(async () => {
+      await context.prisma.auditLog.deleteMany({ where: { userId: { in: context.createdUserIds } } });
       await context.prisma.stockMovement.deleteMany({ where: { product: { sku: { startsWith: label } } } });
       await context.prisma.inventory.deleteMany({ where: { product: { sku: { startsWith: label } } } });
       await context.prisma.product.deleteMany({ where: { sku: { startsWith: label } } });

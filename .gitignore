@@ -17,6 +17,7 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+apps/web/e2e/.auth/
 
 # Environment (never commit real secrets)
 .env

@@ -64,7 +64,7 @@ export class EnvironmentVariables {
   @Matches(ORIGIN_LIST, {
     message: 'WEB_URL must be a comma-separated list of http(s) origins without a trailing slash',
   })
-  WEB_URL = 'http://localhost:3000';
+  WEB_URL = 'http://localhost:3001';
 
   /** Throttle window in seconds. */
   @Type(() => Number)

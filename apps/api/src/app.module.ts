@@ -2,10 +2,13 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CustomersModule } from './customers/customers.module';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { FinanceModule } from './finance/finance.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { appConfig } from './config/app.config';
@@ -17,7 +20,9 @@ import { OrdersModule } from './orders/orders.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { RepairsModule } from './repairs/repairs.module';
+import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
+import { SettingsModule } from './settings/settings.module';
 import { StockModule } from './stock/stock.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
@@ -41,6 +46,7 @@ import { UsersModule } from './users/users.module';
       }),
     }),
     PrismaModule,
+    AuditModule,
     AuthModule,
     UsersModule,
     CustomersModule,
@@ -52,6 +58,10 @@ import { UsersModule } from './users/users.module';
     OrdersModule,
     RepairsModule,
     ReturnsModule,
+    FinanceModule,
+    DashboardModule,
+    ReportsModule,
+    SettingsModule,
     HealthModule,
   ],
   providers: [

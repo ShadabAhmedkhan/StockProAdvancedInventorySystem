@@ -15,6 +15,10 @@ describe('Users and RBAC (e2e)', () => {
   beforeAll(async () => {
     context = await createTestApp();
 
+    context.cleanup.push(async () => {
+      await context.prisma.auditLog.deleteMany({ where: { userId: { in: context.createdUserIds } } });
+    });
+
     const staff = await registerUser(context, 'staff');
     staffToken = staff.accessToken;
 

@@ -2,11 +2,12 @@ import { randomBytes } from 'node:crypto';
 import { ConflictException, ForbiddenException, Inject, Injectable, UnauthorizedException, type OnModuleInit } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { hashPassword, verifyPassword } from '../common/utils/password.util';
 import { jwtConfig } from '../config/jwt.config';
-import { UserRole, UserStatus } from '../generated/prisma/enums';
+import { AuditAction, AuditEntity, UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthResult, PublicUser } from './dto/auth-response.dto';
 import type { LoginDto } from './dto/login.dto';
@@ -48,6 +49,7 @@ export class AuthService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly refreshTokens: RefreshTokenService,
+    private readonly auditService: AuditService,
     @Inject(jwtConfig.KEY) private readonly config: ConfigType<typeof jwtConfig>,
   ) {}
 
@@ -96,18 +98,43 @@ export class AuthService implements OnModuleInit {
     const passwordMatches = await verifyPassword(user?.passwordHash ?? this.decoyHash, dto.password);
 
     if (user === null || !passwordMatches) {
+      await this.auditService.record({
+        userId: null,
+        action: AuditAction.LOGIN_FAILED,
+        entity: AuditEntity.AUTH,
+        metadata: { email: dto.email, reason: 'invalid_credentials' },
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+      });
       throw new UnauthorizedException({ code: ErrorCode.UNAUTHORIZED, message: 'Invalid email or password' });
     }
 
     // Only reachable by someone who already proved the password, so naming the
     // real reason here leaks nothing and saves a support call.
     if (user.status !== UserStatus.ACTIVE) {
+      await this.auditService.record({
+        userId: user.id,
+        action: AuditAction.LOGIN_FAILED,
+        entity: AuditEntity.AUTH,
+        metadata: { email: dto.email, reason: 'account_not_active' },
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+      });
       throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'This account is not active. Contact an administrator.' });
     }
 
     const { passwordHash: _passwordHash, ...publicUser } = user;
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+
+    await this.auditService.record({
+      userId: user.id,
+      action: AuditAction.LOGIN,
+      entity: AuditEntity.AUTH,
+      metadata: { email: user.email },
+      ipAddress: context.ipAddress ?? null,
+      userAgent: context.userAgent ?? null,
+    });
 
     return this.startSession(publicUser, context);
   }
@@ -138,12 +165,22 @@ export class AuthService implements OnModuleInit {
   }
 
   /** Idempotent: an absent, unknown or already-revoked token is not an error. */
-  async logout(presentedToken: string | undefined): Promise<void> {
+  async logout(presentedToken: string | undefined, context: RefreshTokenContext = {}): Promise<void> {
     if (presentedToken === undefined || presentedToken === '') {
       return;
     }
 
-    await this.refreshTokens.revoke(presentedToken);
+    const userId = await this.refreshTokens.revoke(presentedToken);
+
+    if (userId !== null) {
+      await this.auditService.record({
+        userId,
+        action: AuditAction.LOGOUT,
+        entity: AuditEntity.AUTH,
+        ipAddress: context.ipAddress ?? null,
+        userAgent: context.userAgent ?? null,
+      });
+    }
   }
 
   /**

@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { RefreshTokenService } from '../auth/refresh-token.service';
+import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import { UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -37,6 +38,7 @@ describe('UsersService', () => {
   let count: jest.Mock;
   let transaction: jest.Mock;
   let revokeAllForUser: jest.Mock;
+  let record: jest.Mock;
 
   beforeEach(async () => {
     findUnique = jest.fn();
@@ -47,12 +49,14 @@ describe('UsersService', () => {
     // The service passes an array of unresolved queries to $transaction.
     transaction = jest.fn((operations: Promise<unknown>[]) => Promise.all(operations));
     revokeAllForUser = jest.fn(() => Promise.resolve(2));
+    record = jest.fn(() => Promise.resolve());
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: PrismaService, useValue: { user: { findUnique, findMany, create, update, count }, $transaction: transaction } },
         { provide: RefreshTokenService, useValue: { revokeAllForUser } },
+        { provide: AuditService, useValue: { record } },
       ],
     }).compile();
 
@@ -130,7 +134,7 @@ describe('UsersService', () => {
     it('hashes the password and honours the requested role', async () => {
       findUnique.mockResolvedValue(null);
 
-      await service.create(dto);
+      await service.create(dto, CALLER_ID);
 
       const { data } = firstCallArg(create) as { data: { passwordHash: string; role: UserRole } };
       expect(data.passwordHash).toMatch(/^\$argon2id\$/);
@@ -140,7 +144,15 @@ describe('UsersService', () => {
     it('rejects a duplicate email', async () => {
       findUnique.mockResolvedValue({ id: 'other' });
 
-      await expect(service.create(dto)).rejects.toThrow(ConflictException);
+      await expect(service.create(dto, CALLER_ID)).rejects.toThrow(ConflictException);
+    });
+
+    it('records who created the account', async () => {
+      findUnique.mockResolvedValue(null);
+
+      await service.create(dto, CALLER_ID);
+
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: CALLER_ID, action: 'CREATE', entity: 'USER', entityId: 'user-1' }));
     });
   });
 
@@ -165,6 +177,9 @@ describe('UsersService', () => {
       const result = await service.changeRole('user-1', UserRole.MANAGER, CALLER_ID);
 
       expect(result.role).toBe(UserRole.MANAGER);
+      expect(record).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: CALLER_ID, action: 'ROLE_CHANGED', entityId: 'user-1', metadata: { from: UserRole.STAFF, to: UserRole.MANAGER } }),
+      );
     });
 
     it('refuses to let an administrator change their own role', async () => {
@@ -196,6 +211,7 @@ describe('UsersService', () => {
       await service.changeStatus('user-1', UserStatus.SUSPENDED, CALLER_ID);
 
       expect(revokeAllForUser).toHaveBeenCalledWith('user-1');
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: CALLER_ID, action: 'STATUS_CHANGED', entityId: 'user-1' }));
     });
 
     it('leaves sessions alone when a user is reactivated', async () => {

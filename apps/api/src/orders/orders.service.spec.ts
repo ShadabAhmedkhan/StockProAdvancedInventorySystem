@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import { firstCallArg, lastCallArg } from '../common/testing/mock-args';
 import { Prisma } from '../generated/prisma/client';
 import { OrderStatus, PaymentMethod, PaymentStatus } from '../generated/prisma/enums';
@@ -58,7 +59,9 @@ describe('OrdersService', () => {
   let itemDelete: jest.Mock;
   let itemFindMany: jest.Mock;
   let itemFindUnique: jest.Mock;
+  let itemCreateMany: jest.Mock;
   let productFindUnique: jest.Mock;
+  let productFindMany: jest.Mock;
   let customerFindUnique: jest.Mock;
   let paymentCreate: jest.Mock;
   let executeRaw: jest.Mock;
@@ -90,9 +93,20 @@ describe('OrdersService', () => {
       ),
     );
 
+    itemCreateMany = jest.fn(() => Promise.resolve({ count: 1 }));
+
     productFindUnique = jest.fn(() => Promise.resolve({ sku: 'SPH-AUR-A12', sellingPrice: decimal('25.00'), isActive: true, deletedAt: null }));
+    // The batched lookup `create()` uses for its opening lines; sourced from the same
+    // override point (`productFindUnique.mockResolvedValue(...)`) so existing tests that
+    // configure a single product's shape work for both the single-item and batch paths.
+    productFindMany = jest.fn(async (args: { where: { id: { in: string[] } } }) => {
+      const product = (await productFindUnique()) as Record<string, unknown>;
+      return args.where.id.in.map((id) => ({ id, ...product }));
+    });
     customerFindUnique = jest.fn(() => Promise.resolve({ deletedAt: null }));
-    paymentCreate = jest.fn(() => Promise.resolve({ id: 'payment-1', paymentNumber: 'PAY-00000001' }));
+    paymentCreate = jest.fn((args: { data: { amount: string } & Record<string, unknown> }) =>
+      Promise.resolve({ id: 'payment-1', paymentNumber: 'PAY-00000001', paidAt: new Date(), ...args.data, amount: decimal(args.data.amount) }),
+    );
 
     // The conditional UPDATEs report how many rows they matched.
     executeRaw = jest.fn(() => Promise.resolve(1));
@@ -118,10 +132,11 @@ describe('OrdersService', () => {
         findMany: orderFindMany,
         count: orderCount,
       },
-      orderItem: { create: itemCreate, update: itemUpdate, delete: itemDelete, findMany: itemFindMany, findUnique: itemFindUnique },
-      product: { findUnique: productFindUnique },
+      orderItem: { create: itemCreate, createMany: itemCreateMany, update: itemUpdate, delete: itemDelete, findMany: itemFindMany, findUnique: itemFindUnique },
+      product: { findUnique: productFindUnique, findMany: productFindMany },
       customer: { findUnique: customerFindUnique },
       payment: { create: paymentCreate, findMany: jest.fn(() => Promise.resolve([])) },
+      financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },
       stockMovement: { createMany: jest.fn(() => Promise.resolve({ count: 1 })) },
       $executeRaw: executeRaw,
@@ -133,7 +148,11 @@ describe('OrdersService', () => {
     );
 
     const moduleRef = await Test.createTestingModule({
-      providers: [OrdersService, { provide: PrismaService, useValue: { ...client, $transaction: transaction } }],
+      providers: [
+        OrdersService,
+        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
+      ],
     }).compile();
 
     service = moduleRef.get(OrdersService);
@@ -199,17 +218,19 @@ describe('OrdersService', () => {
     it('prices an opening line from the product when no price is given', async () => {
       await service.create({ items: [{ productId: PRODUCT_ID, quantity: 3 }] }, USER_ID);
 
-      const { data } = firstCallArg(itemCreate) as { data: { unitPrice: Prisma.Decimal; total: Prisma.Decimal } };
-      expect(data.unitPrice.toFixed(2)).toBe('25.00');
-      expect(data.total.toFixed(2)).toBe('75.00');
+      const { data } = firstCallArg(itemCreateMany) as { data: { unitPrice: Prisma.Decimal; total: Prisma.Decimal }[] };
+      const [line] = data;
+      expect(line?.unitPrice.toFixed(2)).toBe('25.00');
+      expect(line?.total.toFixed(2)).toBe('75.00');
     });
 
     it('honours a negotiated price over the catalogue price', async () => {
       await service.create({ items: [{ productId: PRODUCT_ID, quantity: 2, unitPrice: '19.99' }] }, USER_ID);
 
-      const { data } = firstCallArg(itemCreate) as { data: { unitPrice: Prisma.Decimal; total: Prisma.Decimal } };
-      expect(data.unitPrice.toFixed(2)).toBe('19.99');
-      expect(data.total.toFixed(2)).toBe('39.98');
+      const { data } = firstCallArg(itemCreateMany) as { data: { unitPrice: Prisma.Decimal; total: Prisma.Decimal }[] };
+      const [line] = data;
+      expect(line?.unitPrice.toFixed(2)).toBe('19.99');
+      expect(line?.total.toFixed(2)).toBe('39.98');
     });
 
     it('writes the order, its lines and its totals in a single transaction', async () => {
@@ -219,7 +240,7 @@ describe('OrdersService', () => {
       // priced takes the half-built order down with it.
       expect(transaction).toHaveBeenCalledTimes(1);
       expect(orderCreate).toHaveBeenCalledTimes(1);
-      expect(itemCreate).toHaveBeenCalledTimes(1);
+      expect(itemCreateMany).toHaveBeenCalledTimes(1);
       expect(orderUpdate).toHaveBeenCalledTimes(1);
     });
 
@@ -379,7 +400,7 @@ describe('OrdersService', () => {
       orderFindUnique.mockResolvedValue(orderRow({ status: OrderStatus.CONFIRMED }));
       itemFindMany.mockResolvedValue([{ productId: PRODUCT_ID, quantity: 2, product: { sku: 'SPH-AUR-A12' } }]);
 
-      await service.cancel(ORDER_ID);
+      await service.cancel(ORDER_ID, USER_ID);
 
       const released = executeRaw.mock.calls.some((call) => rawSql(call as unknown[]).includes('"reservedQuantity" - '));
       expect(released).toBe(true);
@@ -388,7 +409,7 @@ describe('OrdersService', () => {
     it('releases nothing for a draft, which never reserved anything', async () => {
       orderFindUnique.mockResolvedValue(orderRow({ status: OrderStatus.DRAFT }));
 
-      await service.cancel(ORDER_ID);
+      await service.cancel(ORDER_ID, USER_ID);
 
       const touchedInventory = executeRaw.mock.calls.some((call) => rawSql(call as unknown[]).includes('"Inventory"'));
       expect(touchedInventory).toBe(false);
@@ -398,13 +419,13 @@ describe('OrdersService', () => {
       orderFindUnique.mockResolvedValue(orderRow({ status: OrderStatus.CONFIRMED }));
       orderFindUniqueOrThrow.mockResolvedValue({ paidAmount: decimal('20.00') });
 
-      await expect(service.cancel(ORDER_ID)).rejects.toThrow(/refund the payment before cancelling/);
+      await expect(service.cancel(ORDER_ID, USER_ID)).rejects.toThrow(/refund the payment before cancelling/);
     });
 
     it('reports a missing order as not found', async () => {
       orderFindUnique.mockResolvedValue(null);
 
-      await expect(service.cancel(ORDER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.cancel(ORDER_ID, USER_ID)).rejects.toThrow(NotFoundException);
     });
   });
 

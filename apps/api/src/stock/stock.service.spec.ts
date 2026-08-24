@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Prisma } from '../generated/prisma/client';
 import { StockMovementType, StockReferenceType } from '../generated/prisma/enums';
@@ -47,7 +48,11 @@ describe('StockService', () => {
     );
 
     const moduleRef = await Test.createTestingModule({
-      providers: [StockService, { provide: PrismaService, useValue: { ...client, $transaction: transaction } }],
+      providers: [
+        StockService,
+        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
+      ],
     }).compile();
 
     service = moduleRef.get(StockService);

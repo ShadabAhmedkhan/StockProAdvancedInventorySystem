@@ -1,5 +1,6 @@
-import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import { firstCallArg, lastCallArg } from '../common/testing/mock-args';
 import { Prisma } from '../generated/prisma/client';
 import {
@@ -80,7 +81,9 @@ describe('ReturnsService', () => {
 
   beforeEach(async () => {
     lockedOrder = { orderNumber: 'ORD-00000001', status: OrderStatus.COMPLETED, customerId: null, paidAmount: '100.00' };
-    transitionRows = [{ refundAmount: '50.00' }];
+    // Serves both the pending-lock (which reads `orderId`) and the status
+    // transition (which reads the credit back).
+    transitionRows = [{ refundAmount: '50.00', orderId: ORDER_ID }];
 
     returnCreate = jest.fn(() => Promise.resolve({ id: RETURN_ID }));
     returnUpdate = jest.fn(() => Promise.resolve({ id: RETURN_ID }));
@@ -116,7 +119,9 @@ describe('ReturnsService', () => {
     orderItemFindUniqueOrThrow = jest.fn(() => Promise.resolve({ quantity: 3, total: decimal('50.00') }));
     orderUpdate = jest.fn(() => Promise.resolve({ id: ORDER_ID }));
 
-    paymentCreate = jest.fn(() => Promise.resolve({ id: 'payment-1' }));
+    paymentCreate = jest.fn((args: { data: { amount: string; paymentNumber: string } & Record<string, unknown> }) =>
+      Promise.resolve({ id: 'payment-1', paidAt: new Date(), ...args.data, amount: decimal(args.data.amount) }),
+    );
     paymentAggregate = jest.fn(() => Promise.resolve({ _sum: { amount: null } }));
     movementCreateMany = jest.fn(() => Promise.resolve({ count: 1 }));
 
@@ -150,6 +155,7 @@ describe('ReturnsService', () => {
       orderItem: { findUnique: orderItemFindUnique, findUniqueOrThrow: orderItemFindUniqueOrThrow },
       order: { update: orderUpdate },
       payment: { create: paymentCreate, aggregate: paymentAggregate, findMany: jest.fn(() => Promise.resolve([])) },
+      financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       stockMovement: { createMany: movementCreateMany },
       $queryRaw: queryRaw,
     };
@@ -159,7 +165,11 @@ describe('ReturnsService', () => {
     );
 
     const moduleRef = await Test.createTestingModule({
-      providers: [ReturnsService, { provide: PrismaService, useValue: { ...client, $transaction: transaction } }],
+      providers: [
+        ReturnsService,
+        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
+      ],
     }).compile();
 
     service = moduleRef.get(ReturnsService);
@@ -206,7 +216,14 @@ describe('ReturnsService', () => {
     });
 
     it('refuses a line that belongs to a different order', async () => {
-      orderItemFindUnique.mockResolvedValue({ orderId: 'another-order', productId: PRODUCT_ID, quantity: 3, unitPrice: decimal('20.00'), total: decimal('50.00'), product: { sku: 'X' } });
+      orderItemFindUnique.mockResolvedValue({
+        orderId: 'another-order',
+        productId: PRODUCT_ID,
+        quantity: 3,
+        unitPrice: decimal('20.00'),
+        total: decimal('50.00'),
+        product: { sku: 'X' },
+      });
 
       await expect(service.create(intake, USER_ID)).rejects.toThrow(/not on the order this return is against/);
     });
@@ -321,7 +338,7 @@ describe('ReturnsService', () => {
 
   describe('approving and rejecting', () => {
     it('approves without moving stock or money', async () => {
-      await service.approve(RETURN_ID);
+      await service.approve(RETURN_ID, USER_ID);
 
       expect(movementCreateMany).not.toHaveBeenCalled();
       expect(paymentCreate).not.toHaveBeenCalled();
@@ -331,7 +348,7 @@ describe('ReturnsService', () => {
       transitionRows = [];
       returnFindUnique.mockResolvedValue(returnRow({ status: ReturnStatus.REJECTED }));
 
-      await expect(service.approve(RETURN_ID)).rejects.toThrow(/is REJECTED, which is final/);
+      await expect(service.approve(RETURN_ID, USER_ID)).rejects.toThrow(/is REJECTED, which is final/);
     });
 
     it('rejects a pending return without touching stock', async () => {
@@ -344,7 +361,7 @@ describe('ReturnsService', () => {
       transitionRows = [];
       returnFindUnique.mockResolvedValue(null);
 
-      await expect(service.approve(RETURN_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.approve(RETURN_ID, USER_ID)).rejects.toThrow(NotFoundException);
     });
   });
 

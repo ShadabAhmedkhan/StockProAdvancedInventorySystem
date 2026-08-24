@@ -1,11 +1,23 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import type { CreatePaymentDto } from '../common/dto/create-payment.dto';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { consumeStock, releaseStock, reserveStock, type StockLine } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { Prisma, type Payment, type RepairStatusHistory } from '../generated/prisma/client';
-import { PaymentReferenceType, RepairStatus, StockMovementType, StockReferenceType, UserRole, UserStatus } from '../generated/prisma/enums';
+import {
+  AuditAction,
+  AuditEntity,
+  PaymentReferenceType,
+  RepairStatus,
+  StockMovementType,
+  StockReferenceType,
+  TransactionReferenceType,
+  TransactionType,
+  UserRole,
+  UserStatus,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ChangeRepairStatusDto } from './dto/change-repair-status.dto';
 import type { CreateRepairItemDto } from './dto/create-repair-item.dto';
@@ -50,7 +62,10 @@ const TECHNICIAN_ROLES: readonly UserRole[] = [UserRole.TECHNICIAN, UserRole.ADM
  */
 @Injectable()
 export class RepairsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findAll(query: RepairQueryDto): Promise<Paginated<RepairSummary>> {
     const where = buildRepairWhere(query, new Date());
@@ -193,6 +208,17 @@ export class RepairsService {
         data: { repairId: id, fromStatus: current.status, toStatus: dto.toStatus, note: dto.note ?? null, changedById: userId },
       });
 
+      await this.auditService.record(
+        {
+          userId,
+          action: AuditAction.REPAIR_STATUS_CHANGED,
+          entity: AuditEntity.REPAIR,
+          entityId: id,
+          metadata: { from: current.status, to: dto.toStatus },
+        },
+        tx,
+      );
+
       const parts = await stockLines(tx, id);
 
       if (dto.toStatus === RepairStatus.COMPLETED) {
@@ -316,7 +342,7 @@ export class RepairsService {
         });
       }
 
-      return tx.payment.create({
+      const payment = await tx.payment.create({
         data: {
           paymentNumber: await nextDocumentNumber(tx, 'PAYMENT'),
           method: dto.method,
@@ -329,6 +355,31 @@ export class RepairsService {
           createdById: userId,
         },
       });
+
+      await tx.financialTransaction.create({
+        data: {
+          type: TransactionType.REPAIR_PAYMENT,
+          amount: payment.amount,
+          description: `Repair payment ${payment.paymentNumber}`,
+          occurredAt: payment.paidAt,
+          referenceType: TransactionReferenceType.REPAIR,
+          referenceId: id,
+          createdById: userId,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          userId,
+          action: AuditAction.PAYMENT_RECORDED,
+          entity: AuditEntity.PAYMENT,
+          entityId: payment.id,
+          metadata: { amount: payment.amount.toFixed(2), method: payment.method, referenceType: payment.referenceType },
+        },
+        tx,
+      );
+
+      return payment;
     });
   }
 

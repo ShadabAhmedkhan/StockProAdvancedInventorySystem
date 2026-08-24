@@ -106,6 +106,9 @@ describe('Repairs concurrency (e2e)', () => {
     context.cleanup.push(async () => {
       const createdById = { in: context.createdUserIds };
 
+      await context.prisma.auditLog.deleteMany({ where: { userId: createdById } });
+
+      await context.prisma.financialTransaction.deleteMany({ where: { createdById } });
       await context.prisma.payment.deleteMany({ where: { createdById } });
       await context.prisma.repairStatusHistory.deleteMany({ where: { changedById: createdById } });
       await context.prisma.repair.deleteMany({ where: { customer: { customerCode: { startsWith: label } } } });

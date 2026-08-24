@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -8,6 +9,7 @@ import { ProductsService } from './products.service';
 
 const CATEGORY_ID = '00000000-0000-4000-8000-000000000001';
 const BRAND_ID = '00000000-0000-4000-8000-000000000002';
+const CALLER_ID = '00000000-0000-4000-8000-0000000000ff';
 
 function product(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -85,7 +87,11 @@ describe('ProductsService', () => {
     );
 
     const moduleRef = await Test.createTestingModule({
-      providers: [ProductsService, { provide: PrismaService, useValue: { ...client, $transaction: transaction } }],
+      providers: [
+        ProductsService,
+        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
+      ],
     }).compile();
 
     service = moduleRef.get(ProductsService);
@@ -168,7 +174,7 @@ describe('ProductsService', () => {
 
   describe('create', () => {
     it('creates the product and its inventory row in one transaction', async () => {
-      await service.create(validDto);
+      await service.create(validDto, CALLER_ID);
 
       expect(transaction).toHaveBeenCalledTimes(1);
       expect(productCreate).toHaveBeenCalledTimes(1);
@@ -176,7 +182,7 @@ describe('ProductsService', () => {
     });
 
     it('passes money through as an exact string, never a number', async () => {
-      await service.create(validDto);
+      await service.create(validDto, CALLER_ID);
 
       const { data } = firstCallArg(productCreate) as { data: Record<string, unknown> };
       expect(data.costPrice).toBe('10.00');
@@ -185,7 +191,7 @@ describe('ProductsService', () => {
     });
 
     it('normalises absent optional fields to null', async () => {
-      await service.create({ ...validDto, barcode: undefined, brandId: undefined });
+      await service.create({ ...validDto, barcode: undefined, brandId: undefined }, CALLER_ID);
 
       const { data } = firstCallArg(productCreate) as { data: Record<string, unknown> };
       expect(data.barcode).toBeNull();
@@ -195,14 +201,14 @@ describe('ProductsService', () => {
     it('rejects a duplicate SKU before opening a transaction', async () => {
       productFindUnique.mockResolvedValue({ id: 'other', deletedAt: null });
 
-      await expect(service.create(validDto)).rejects.toThrow(ConflictException);
+      await expect(service.create(validDto, CALLER_ID)).rejects.toThrow(ConflictException);
       expect(transaction).not.toHaveBeenCalled();
     });
 
     it('says so when the SKU belongs to a deleted product', async () => {
       productFindUnique.mockResolvedValue({ id: 'other', deletedAt: new Date() });
 
-      await expect(service.create(validDto)).rejects.toThrow(/deleted product/i);
+      await expect(service.create(validDto, CALLER_ID)).rejects.toThrow(/deleted product/i);
     });
 
     it.each([
@@ -214,7 +220,7 @@ describe('ProductsService', () => {
       productFindUnique.mockResolvedValue(null);
       arrange();
 
-      const error = await service.create(validDto).catch((thrown: unknown) => thrown);
+      const error = await service.create(validDto, CALLER_ID).catch((thrown: unknown) => thrown);
 
       expect(error).toBeInstanceOf(BadRequestException);
       expect(JSON.stringify((error as BadRequestException).getResponse())).toContain(field);
@@ -224,14 +230,14 @@ describe('ProductsService', () => {
 
   describe('update', () => {
     it('changes only the fields that were supplied', async () => {
-      await service.update('product-1', { sellingPrice: '449.00' });
+      await service.update('product-1', { sellingPrice: '449.00' }, CALLER_ID);
 
       const { data } = firstCallArg(productUpdate) as { data: Record<string, unknown> };
       expect(data).toEqual({ sellingPrice: '449.00' });
     });
 
     it('does not re-check a category that was not supplied', async () => {
-      await service.update('product-1', { name: 'Renamed' });
+      await service.update('product-1', { name: 'Renamed' }, CALLER_ID);
 
       expect(categoryFindUnique).not.toHaveBeenCalled();
     });
@@ -241,7 +247,7 @@ describe('ProductsService', () => {
     it('soft-deletes a product that holds no stock', async () => {
       productFindUnique.mockResolvedValue(product({ inventory: { quantity: 0, reservedQuantity: 0, updatedAt: new Date() } }));
 
-      await service.remove('product-1');
+      await service.remove('product-1', CALLER_ID);
 
       const { data } = firstCallArg(productUpdate) as { data: { deletedAt: Date } };
       expect(data.deletedAt).toBeInstanceOf(Date);
@@ -250,14 +256,14 @@ describe('ProductsService', () => {
     it('refuses to delete a product that still has units on a shelf', async () => {
       productFindUnique.mockResolvedValue(product({ inventory: { quantity: 7, reservedQuantity: 0, updatedAt: new Date() } }));
 
-      await expect(service.remove('product-1')).rejects.toThrow(/7 unit\(s\) in stock/);
+      await expect(service.remove('product-1', CALLER_ID)).rejects.toThrow(/7 unit\(s\) in stock/);
       expect(productUpdate).not.toHaveBeenCalled();
     });
 
     it('raises a not-found for a product that is already deleted', async () => {
       productFindUnique.mockResolvedValue(product({ deletedAt: new Date() }));
 
-      await expect(service.remove('product-1')).rejects.toThrow(NotFoundException);
+      await expect(service.remove('product-1', CALLER_ID)).rejects.toThrow(NotFoundException);
     });
   });
 

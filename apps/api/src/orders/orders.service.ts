@@ -1,10 +1,20 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { consumeStock, releaseStock, reserveStock, type StockLine } from '../common/inventory/stock-operations';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { Prisma, type Payment } from '../generated/prisma/client';
-import { OrderStatus, PaymentReferenceType, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
+import {
+  AuditAction,
+  AuditEntity,
+  OrderStatus,
+  PaymentReferenceType,
+  StockMovementType,
+  StockReferenceType,
+  TransactionReferenceType,
+  TransactionType,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateOrderItemDto } from './dto/create-order-item.dto';
 import type { CreatePaymentDto } from '../common/dto/create-payment.dto';
@@ -37,7 +47,10 @@ import { buildOrderWhere, ORDER_DETAIL_INCLUDE, ORDER_SUMMARY_INCLUDE, withOutst
  */
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findAll(query: OrderQueryDto): Promise<Paginated<OrderSummary>> {
     const where = buildOrderWhere(query);
@@ -78,9 +91,7 @@ export class OrdersService {
         select: { id: true },
       });
 
-      for (const item of dto.items ?? []) {
-        await insertItem(tx, order.id, item);
-      }
+      await insertItems(tx, order.id, dto.items ?? []);
 
       await reprice(tx, order.id, money(dto.discount), money(dto.tax));
 
@@ -188,6 +199,8 @@ export class OrdersService {
         referenceId: id,
         userId,
       });
+
+      await this.auditService.record({ userId, action: AuditAction.ORDER_COMPLETED, entity: AuditEntity.ORDER, entityId: id }, tx);
     });
 
     return this.findOne(id);
@@ -197,7 +210,7 @@ export class OrdersService {
    * Calls the sale off. A confirmed order gives its reservation back; a draft
    * never held one.
    */
-  async cancel(id: string): Promise<OrderDetail> {
+  async cancel(id: string, userId: string): Promise<OrderDetail> {
     await this.prisma.$transaction(async (tx) => {
       const current = await tx.order.findUnique({ where: { id }, select: { status: true } });
 
@@ -228,6 +241,8 @@ export class OrdersService {
       if (from === OrderStatus.CONFIRMED) {
         await releaseStock(tx, await stockLines(tx, id));
       }
+
+      await this.auditService.record({ userId, action: AuditAction.ORDER_CANCELLED, entity: AuditEntity.ORDER, entityId: id }, tx);
     });
 
     return this.findOne(id);
@@ -271,6 +286,29 @@ export class OrdersService {
           createdById: userId,
         },
       });
+
+      await tx.financialTransaction.create({
+        data: {
+          type: TransactionType.SALE,
+          amount: payment.amount,
+          description: `Order payment ${payment.paymentNumber}`,
+          occurredAt: payment.paidAt,
+          referenceType: TransactionReferenceType.ORDER,
+          referenceId: id,
+          createdById: userId,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          userId,
+          action: AuditAction.PAYMENT_RECORDED,
+          entity: AuditEntity.PAYMENT,
+          entityId: payment.id,
+          metadata: { amount: payment.amount.toFixed(2), method: payment.method, referenceType: payment.referenceType },
+        },
+        tx,
+      );
 
       // Safe as a second statement: the update above holds the order's row
       // lock for the rest of the transaction, so nothing can change the
@@ -368,6 +406,47 @@ async function insertItem(tx: Prisma.TransactionClient, orderId: string, dto: Cr
   };
 
   await tx.orderItem.create({ data: { orderId, productId: dto.productId, ...line, total: pricedLine(line, product.sku) } });
+}
+
+/** Batched version of {@link insertItem} for opening a draft with several lines at once:
+ * one product lookup and one insert instead of two round-trips per line. Only usable when
+ * `orderId` has no existing items yet (true for a brand-new draft), since that lets the
+ * duplicate-productId check run in memory instead of a per-item query. */
+async function insertItems(tx: Prisma.TransactionClient, orderId: string, items: CreateOrderItemDto[]): Promise<void> {
+  if (items.length === 0) return;
+
+  const products = await tx.product.findMany({
+    where: { id: { in: [...new Set(items.map((item) => item.productId))] } },
+    select: { id: true, sku: true, sellingPrice: true, isActive: true, deletedAt: true },
+  });
+  const byId = new Map(products.map((product) => [product.id, product]));
+
+  const seenProductIds = new Set<string>();
+  const rows = items.map((item) => {
+    const product = byId.get(item.productId);
+    if (product?.deletedAt !== null) {
+      throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Product not found' });
+    }
+    if (!product.isActive) {
+      throw new UnprocessableEntityException({ code: ErrorCode.UNPROCESSABLE_ENTITY, message: `${product.sku} has been withdrawn from sale` });
+    }
+    if (seenProductIds.has(item.productId)) {
+      throw new ConflictException({
+        code: ErrorCode.CONFLICT,
+        message: `${product.sku} is already on this order; change the quantity on that line instead`,
+      });
+    }
+    seenProductIds.add(item.productId);
+
+    const line: LineAmounts = {
+      quantity: item.quantity,
+      unitPrice: item.unitPrice === undefined ? product.sellingPrice : money(item.unitPrice),
+      discount: money(item.discount),
+    };
+    return { orderId, productId: item.productId, ...line, total: pricedLine(line, product.sku) };
+  });
+
+  await tx.orderItem.createMany({ data: rows });
 }
 
 async function findItem(tx: Prisma.TransactionClient, orderId: string, itemId: string): Promise<OrderItemForUpdate> {

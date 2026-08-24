@@ -7,15 +7,19 @@
   "description": "Shared ESLint flat-config presets for the Stock Pro monorepo.",
   "files": [
     "base.js",
-    "node.js"
+    "node.js",
+    "react.js"
   ],
   "exports": {
     "./base": "./base.js",
-    "./node": "./node.js"
+    "./node": "./node.js",
+    "./react": "./react.js"
   },
   "dependencies": {
     "@eslint/js": "^9.39.1",
+    "@next/eslint-plugin-next": "^16.3.2",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^16.5.0",
     "typescript-eslint": "^8.47.0"
   },

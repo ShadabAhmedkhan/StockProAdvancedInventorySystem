@@ -13,6 +13,11 @@ describe('Sessions (e2e)', () => {
 
   beforeAll(async () => {
     context = await createTestApp();
+
+    context.cleanup.push(async () => {
+      await context.prisma.auditLog.deleteMany({ where: { userId: { in: context.createdUserIds } } });
+    });
+
     signedIn = await registerUser(context, 'session');
 
     // Login attempt 1 of the 5 allowed per minute.

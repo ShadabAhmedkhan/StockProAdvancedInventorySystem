@@ -42,8 +42,8 @@ export class UsersController {
   @Roles(UserRole.ADMIN)
   @Post()
   @ApiOperation({ summary: 'Create a user with an explicit role' })
-  create(@Body() dto: CreateUserDto): Promise<PublicUser> {
-    return this.usersService.create(dto);
+  create(@Body() dto: CreateUserDto, @CurrentUser() caller: AuthenticatedUser): Promise<PublicUser> {
+    return this.usersService.create(dto, caller.id);
   }
 
   @Roles(UserRole.ADMIN)

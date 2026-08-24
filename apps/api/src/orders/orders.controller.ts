@@ -96,8 +96,8 @@ export class OrdersController {
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cancel a draft or confirmed order, releasing any reservation' })
-  cancel(@Param('id', ParseUUIDPipe) id: string): Promise<OrderDetail> {
-    return this.ordersService.cancel(id);
+  cancel(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() caller: AuthenticatedUser): Promise<OrderDetail> {
+    return this.ordersService.cancel(id, caller.id);
   }
 
   @Get(':id/payments')

@@ -1,10 +1,22 @@
 import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { restoreStock, type StockLine } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { Prisma, type Payment } from '../generated/prisma/client';
-import { OrderStatus, PaymentReferenceType, PaymentStatus, ReturnStatus, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
+import {
+  AuditAction,
+  AuditEntity,
+  OrderStatus,
+  PaymentReferenceType,
+  PaymentStatus,
+  ReturnStatus,
+  StockMovementType,
+  StockReferenceType,
+  TransactionReferenceType,
+  TransactionType,
+} from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CompleteReturnDto } from './dto/complete-return.dto';
 import type { CreateReturnItemDto } from './dto/create-return-item.dto';
@@ -46,7 +58,10 @@ const ZERO = new Prisma.Decimal(0);
  */
 @Injectable()
 export class ReturnsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findAll(query: ReturnQueryDto): Promise<Paginated<ReturnSummary>> {
     const where = buildReturnWhere(query);
@@ -188,9 +203,10 @@ export class ReturnsService {
   }
 
   /** Agrees to take the goods back. Nothing moves yet. */
-  async approve(id: string): Promise<ReturnDetail> {
+  async approve(id: string, userId: string): Promise<ReturnDetail> {
     await this.prisma.$transaction(async (tx) => {
       await this.transition(tx, id, ReturnStatus.PENDING, ReturnStatus.APPROVED);
+      await this.auditService.record({ userId, action: AuditAction.RETURN_APPROVED, entity: AuditEntity.RETURN, entityId: id }, tx);
     });
 
     return this.findOne(id);
@@ -245,7 +261,7 @@ export class ReturnsService {
       // was never paid for - and the database rejects a payment of nothing, so
       // there is simply no payment to write.
       if (cash.gt(ZERO)) {
-        await tx.payment.create({
+        const payment = await tx.payment.create({
           data: {
             paymentNumber: await nextDocumentNumber(tx, 'PAYMENT'),
             method: dto.method,
@@ -257,7 +273,35 @@ export class ReturnsService {
             createdById: userId,
           },
         });
+
+        await tx.financialTransaction.create({
+          data: {
+            type: TransactionType.REFUND,
+            amount: payment.amount,
+            description: `Refund for return ${payment.paymentNumber}`,
+            occurredAt: payment.paidAt,
+            referenceType: TransactionReferenceType.RETURN,
+            referenceId: id,
+            createdById: userId,
+          },
+        });
+
+        await this.auditService.record(
+          {
+            userId,
+            action: AuditAction.PAYMENT_RECORDED,
+            entity: AuditEntity.PAYMENT,
+            entityId: payment.id,
+            metadata: { amount: payment.amount.toFixed(2), method: payment.method, referenceType: payment.referenceType },
+          },
+          tx,
+        );
       }
+
+      await this.auditService.record(
+        { userId, action: AuditAction.RETURN_COMPLETED, entity: AuditEntity.RETURN, entityId: id, metadata: { refundAmount: credit.toFixed(2) } },
+        tx,
+      );
 
       // Once everything the customer paid has gone back, the order says so.
       if (order.paidAmount.gt(ZERO) && alreadyRefunded.add(cash).gte(order.paidAmount)) {

@@ -217,14 +217,14 @@ interface SeededExpense {
 }
 
 const EXPENSES: SeededExpense[] = [
-  { expenseNumber: 'EXP-000001', category: ExpenseCategory.RENT, description: 'Shop rent - current month', amount: '2400.00', daysAgo: 28 },
-  { expenseNumber: 'EXP-000002', category: ExpenseCategory.UTILITIES, description: 'Electricity and water', amount: '318.45', daysAgo: 27 },
-  { expenseNumber: 'EXP-000003', category: ExpenseCategory.SALARIES, description: 'Staff salaries - current month', amount: '5200.00', daysAgo: 25 },
-  { expenseNumber: 'EXP-000004', category: ExpenseCategory.SUPPLIES, description: 'Workshop consumables and adhesives', amount: '162.90', daysAgo: 18 },
-  { expenseNumber: 'EXP-000005', category: ExpenseCategory.MARKETING, description: 'Local listing and print flyers', amount: '240.00', daysAgo: 14 },
-  { expenseNumber: 'EXP-000006', category: ExpenseCategory.MAINTENANCE, description: 'Soldering station servicing', amount: '95.00', daysAgo: 9 },
-  { expenseNumber: 'EXP-000007', category: ExpenseCategory.TRANSPORT, description: 'Courier for supplier returns', amount: '48.60', daysAgo: 4 },
-  { expenseNumber: 'EXP-000008', category: ExpenseCategory.OTHER, description: 'Point-of-sale software subscription', amount: '79.00', daysAgo: 1 },
+  { expenseNumber: 'EXP-00000001', category: ExpenseCategory.RENT, description: 'Shop rent - current month', amount: '2400.00', daysAgo: 28 },
+  { expenseNumber: 'EXP-00000002', category: ExpenseCategory.UTILITIES, description: 'Electricity and water', amount: '318.45', daysAgo: 27 },
+  { expenseNumber: 'EXP-00000003', category: ExpenseCategory.SALARIES, description: 'Staff salaries - current month', amount: '5200.00', daysAgo: 25 },
+  { expenseNumber: 'EXP-00000004', category: ExpenseCategory.SUPPLIES, description: 'Workshop consumables and adhesives', amount: '162.90', daysAgo: 18 },
+  { expenseNumber: 'EXP-00000005', category: ExpenseCategory.MARKETING, description: 'Local listing and print flyers', amount: '240.00', daysAgo: 14 },
+  { expenseNumber: 'EXP-00000006', category: ExpenseCategory.MAINTENANCE, description: 'Soldering station servicing', amount: '95.00', daysAgo: 9 },
+  { expenseNumber: 'EXP-00000007', category: ExpenseCategory.TRANSPORT, description: 'Courier for supplier returns', amount: '48.60', daysAgo: 4 },
+  { expenseNumber: 'EXP-00000008', category: ExpenseCategory.OTHER, description: 'Point-of-sale software subscription', amount: '79.00', daysAgo: 1 },
 ];
 
 /** Rounds to two decimals using integer cents, never floating-point currency. */
@@ -480,11 +480,13 @@ async function advanceDocumentSequences(): Promise<void> {
   // the orders do.
   const highestOrder = Math.max(...ORDERS.map((order) => documentSerial(order.orderNumber)));
   const highestRepair = Math.max(...REPAIRS.map((repair) => documentSerial(repair.repairNumber)));
+  const highestExpense = Math.max(...EXPENSES.map((expense) => documentSerial(expense.expenseNumber)));
 
   const reached: [sequence: string, highest: number][] = [
     [DOCUMENT_SEQUENCES.ORDER.sequence, highestOrder],
     [DOCUMENT_SEQUENCES.PAYMENT.sequence, highestOrder],
     [DOCUMENT_SEQUENCES.REPAIR.sequence, highestRepair],
+    [DOCUMENT_SEQUENCES.EXPENSE.sequence, highestExpense],
   ];
 
   for (const [sequence, highest] of reached) {

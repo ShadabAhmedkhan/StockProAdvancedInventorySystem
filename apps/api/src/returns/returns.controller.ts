@@ -86,8 +86,8 @@ export class ReturnsController {
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Agree to take the goods back. Nothing moves yet' })
-  approve(@Param('id', ParseUUIDPipe) id: string): Promise<ReturnDetail> {
-    return this.returnsService.approve(id);
+  approve(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() caller: AuthenticatedUser): Promise<ReturnDetail> {
+    return this.returnsService.approve(id, caller.id);
   }
 
   @Roles(UserRole.ADMIN, UserRole.MANAGER)

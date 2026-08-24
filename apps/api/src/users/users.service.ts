@@ -1,11 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PublicUser } from '../auth/dto/auth-response.dto';
 import { RefreshTokenService } from '../auth/refresh-token.service';
+import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { hashPassword } from '../common/utils/password.util';
 import type { Prisma } from '../generated/prisma/client';
-import { UserRole, UserStatus } from '../generated/prisma/enums';
+import { AuditAction, AuditEntity, UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateUserDto } from './dto/create-user.dto';
 import type { UpdateUserDto } from './dto/update-user.dto';
@@ -28,6 +29,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly refreshTokens: RefreshTokenService,
+    private readonly auditService: AuditService,
   ) {}
 
   async findAll(query: UserQueryDto): Promise<Paginated<PublicUser>> {
@@ -54,10 +56,10 @@ export class UsersService {
     return user;
   }
 
-  async create(dto: CreateUserDto): Promise<PublicUser> {
+  async create(dto: CreateUserDto, callerId: string): Promise<PublicUser> {
     await this.assertEmailAvailable(dto.email);
 
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         firstName: dto.firstName,
         lastName: dto.lastName,
@@ -68,6 +70,16 @@ export class UsersService {
       },
       select: PUBLIC_USER_SELECT,
     });
+
+    await this.auditService.record({
+      userId: callerId,
+      action: AuditAction.CREATE,
+      entity: AuditEntity.USER,
+      entityId: user.id,
+      metadata: { email: user.email, role: user.role },
+    });
+
+    return user;
   }
 
   async update(id: string, dto: UpdateUserDto): Promise<PublicUser> {
@@ -107,7 +119,17 @@ export class UsersService {
       await this.assertNotLastActiveAdmin(id);
     }
 
-    return this.prisma.user.update({ where: { id }, data: { role }, select: PUBLIC_USER_SELECT });
+    const updated = await this.prisma.user.update({ where: { id }, data: { role }, select: PUBLIC_USER_SELECT });
+
+    await this.auditService.record({
+      userId: callerId,
+      action: AuditAction.ROLE_CHANGED,
+      entity: AuditEntity.USER,
+      entityId: id,
+      metadata: { from: user.role, to: role },
+    });
+
+    return updated;
   }
 
   /**
@@ -130,6 +152,14 @@ export class UsersService {
     if (status !== UserStatus.ACTIVE) {
       await this.refreshTokens.revokeAllForUser(id);
     }
+
+    await this.auditService.record({
+      userId: callerId,
+      action: AuditAction.STATUS_CHANGED,
+      entity: AuditEntity.USER,
+      entityId: id,
+      metadata: { from: user.status, to: status },
+    });
 
     return updated;
   }

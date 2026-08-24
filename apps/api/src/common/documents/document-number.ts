@@ -20,6 +20,7 @@ export const DOCUMENT_SEQUENCES = {
   PAYMENT: { prefix: 'PAY', sequence: 'payment_number_seq' },
   REPAIR: { prefix: 'REP', sequence: 'repair_number_seq' },
   RETURN: { prefix: 'RET', sequence: 'return_number_seq' },
+  EXPENSE: { prefix: 'EXP', sequence: 'expense_number_seq' },
 } as const;
 
 export type DocumentKind = keyof typeof DOCUMENT_SEQUENCES;

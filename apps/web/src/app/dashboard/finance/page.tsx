@@ -1,0 +1,534 @@
+'use client';
+
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { financeApi, type CreateExpenseInput, type CreateOtherIncomeInput, type UpdateExpenseInput } from '@/features/finance/api';
+import { ExpenseFormDialog } from '@/features/finance/components/expense-form-dialog';
+import { RecordIncomeDialog } from '@/features/finance/components/record-income-dialog';
+import { EXPENSE_CATEGORY_LABELS, TRANSACTION_TYPE_LABELS } from '@/features/finance/labels';
+import type { Expense } from '@/features/finance/types';
+import { PAYMENT_METHOD_LABELS } from '@/features/orders/labels';
+import { useAuth } from '@/hooks/use-auth';
+import { cn } from '@/lib/utils';
+import { errorMessage } from '@/lib/error-message';
+import { formatCurrency, formatDateTime } from '@/lib/format';
+
+const MANAGE_ROLES = new Set(['ADMIN', 'MANAGER']);
+const TABS = ['Summary', 'Expenses', 'Payments', 'Transactions'] as const;
+type Tab = (typeof TABS)[number];
+
+export default function FinancePage(): React.JSX.Element {
+  const { user } = useAuth();
+  const canManage = MANAGE_ROLES.has(user?.role ?? '');
+  const [tab, setTab] = useState<Tab>('Summary');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold">Finance</h1>
+        <p className="text-sm text-muted-foreground">Income, refunds, expenses and the money ledger.</p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          From
+          <Input
+            type="date"
+            value={from}
+            onChange={(event) => {
+              setFrom(event.target.value);
+            }}
+            className="w-40"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          To
+          <Input
+            type="date"
+            value={to}
+            onChange={(event) => {
+              setTo(event.target.value);
+            }}
+            className="w-40"
+          />
+        </label>
+      </div>
+
+      <div className="flex gap-1 border-b border-border">
+        {TABS.map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => {
+              setTab(value);
+            }}
+            className={cn(
+              'border-b-2 px-3 py-2 text-sm',
+              tab === value ? 'border-primary font-medium' : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'Summary' && <SummaryTab from={from} to={to} />}
+      {tab === 'Expenses' && <ExpensesTab canManage={canManage} />}
+      {tab === 'Payments' && <PaymentsTab />}
+      {tab === 'Transactions' && <TransactionsTab canManage={canManage} />}
+    </div>
+  );
+}
+
+function SummaryTab({ from, to }: { from: string; to: string }): React.JSX.Element {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['finance-summary', from, to],
+    queryFn: () => financeApi.summary({ from: from === '' ? undefined : from, to: to === '' ? undefined : to }),
+  });
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading...</p>;
+  if (isError || data === undefined) return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
+
+  const categoryEntries = Object.entries(data.expenses.byCategory) as [keyof typeof EXPENSE_CATEGORY_LABELS, string][];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard label="Income" value={formatCurrency(data.income.total)} hint={`${formatCurrency(data.income.sale)} sales`} />
+        <KpiCard label="Refunds" value={formatCurrency(data.refunds)} />
+        <KpiCard label="Expenses" value={formatCurrency(data.expenses.total)} />
+        <KpiCard label="Net position" value={formatCurrency(data.netPosition)} hint={`${formatCurrency(data.netRevenue)} net revenue`} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Income breakdown</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <Row label="Sales" value={data.income.sale} />
+            <Row label="Repair payments" value={data.income.repairPayment} />
+            <Row label="Other income" value={data.income.otherIncome} />
+            <Row label="Total" value={data.income.total} bold />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Expenses by category</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {categoryEntries.every(([, amount]) => amount === '0.00') ? (
+              <p className="text-muted-foreground">No expenses in this period.</p>
+            ) : (
+              categoryEntries
+                .filter(([, amount]) => amount !== '0.00')
+                .map(([category, amount]) => <Row key={category} label={EXPENSE_CATEGORY_LABELS[category]} value={amount} />)
+            )}
+            <Row label="Total" value={data.expenses.total} bold />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value, bold = false }: { label: string; value: string; bold?: boolean }): React.JSX.Element {
+  return (
+    <div className={cn('flex justify-between', bold && 'font-medium')}>
+      <span className={bold ? '' : 'text-muted-foreground'}>{label}</span>
+      <span className="tabular-nums">{formatCurrency(value)}</span>
+    </div>
+  );
+}
+
+function KpiCard({ label, value, hint }: { label: string; value: string; hint?: string }): React.JSX.Element {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{label}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-2xl font-semibold tabular-nums">{value}</p>
+        {hint !== undefined && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ExpensesTab({ canManage }: { canManage: boolean }): React.JSX.Element {
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState('');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['expenses', page, searchInput],
+    queryFn: () => financeApi.listExpenses({ page, search: searchInput }),
+  });
+
+  const invalidate = async (): Promise<void> => {
+    // Expenses feed into the summary KPIs, so creating/editing/removing one must refresh those too.
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ['expenses'] }), queryClient.invalidateQueries({ queryKey: ['finance-summary'] })]);
+  };
+  const removeMutation = useMutation({ mutationFn: (id: string) => financeApi.removeExpense(id), onSuccess: invalidate });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Input
+          placeholder="Search by expense # or description"
+          value={searchInput}
+          onChange={(event) => {
+            setSearchInput(event.target.value);
+            setPage(1);
+          }}
+          className="max-w-xs"
+        />
+        {canManage && (
+          <Button
+            onClick={() => {
+              setEditingExpense(null);
+              setDialogOpen(true);
+            }}
+          >
+            Record expense
+          </Button>
+        )}
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
+          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {data !== undefined && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Expense #</th>
+                    <th className="p-3 font-medium">Category</th>
+                    <th className="p-3 font-medium">Description</th>
+                    <th className="p-3 text-right font-medium">Amount</th>
+                    <th className="p-3 font-medium">Date</th>
+                    {canManage && <th className="p-3 text-right font-medium">Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.length === 0 && (
+                    <tr>
+                      <td colSpan={canManage ? 6 : 5} className="p-4 text-center text-muted-foreground">
+                        No expenses found.
+                      </td>
+                    </tr>
+                  )}
+                  {data.items.map((expense) => (
+                    <tr key={expense.id} className="border-b border-border last:border-0">
+                      <td className="p-3">{expense.expenseNumber}</td>
+                      <td className="p-3 text-muted-foreground">{EXPENSE_CATEGORY_LABELS[expense.category]}</td>
+                      <td className="p-3 text-muted-foreground">{expense.description}</td>
+                      <td className="p-3 text-right tabular-nums">{formatCurrency(expense.amount)}</td>
+                      <td className="p-3 text-muted-foreground">{formatDateTime(expense.expenseDate)}</td>
+                      {canManage && (
+                        <td className="p-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditingExpense(expense);
+                                setDialogOpen(true);
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void removeMutation.mutateAsync(expense.id);
+                              }}
+                              disabled={removeMutation.isPending}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {data !== undefined && data.pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => {
+                setPage((current) => current - 1);
+              }}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= data.pagination.totalPages}
+              onClick={() => {
+                setPage((current) => current + 1);
+              }}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <ExpenseFormDialog
+        open={dialogOpen}
+        onClose={() => {
+          setDialogOpen(false);
+        }}
+        editingExpense={editingExpense}
+        onCreate={async (input: CreateExpenseInput) => {
+          await financeApi.createExpense(input);
+          await invalidate();
+        }}
+        onUpdate={async (id: string, input: UpdateExpenseInput) => {
+          await financeApi.updateExpense(id, input);
+          await invalidate();
+        }}
+      />
+    </div>
+  );
+}
+
+function PaymentsTab(): React.JSX.Element {
+  const [page, setPage] = useState(1);
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['finance-payments', page],
+    queryFn: () => financeApi.listPayments({ page, search: '' }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="p-0">
+          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
+          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {data !== undefined && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Payment #</th>
+                    <th className="p-3 font-medium">Method</th>
+                    <th className="p-3 font-medium">Source</th>
+                    <th className="p-3 text-right font-medium">Amount</th>
+                    <th className="p-3 font-medium">Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                        No payments found.
+                      </td>
+                    </tr>
+                  )}
+                  {data.items.map((payment) => (
+                    <tr key={payment.id} className="border-b border-border last:border-0">
+                      <td className="p-3">{payment.paymentNumber}</td>
+                      <td className="p-3 text-muted-foreground">{PAYMENT_METHOD_LABELS[payment.method]}</td>
+                      <td className="p-3 text-muted-foreground">
+                        {payment.order !== null && (
+                          <Link href={`/dashboard/orders/${payment.order.id}`} className="hover:underline">
+                            {payment.order.orderNumber}
+                          </Link>
+                        )}
+                        {payment.repair !== null && (
+                          <Link href={`/dashboard/repairs/${payment.repair.id}`} className="hover:underline">
+                            {payment.repair.repairNumber}
+                          </Link>
+                        )}
+                        {payment.returnRecord !== null && (
+                          <Link href={`/dashboard/returns/${payment.returnRecord.id}`} className="hover:underline">
+                            {payment.returnRecord.returnNumber}
+                          </Link>
+                        )}
+                      </td>
+                      <td className="p-3 text-right tabular-nums">{formatCurrency(payment.amount)}</td>
+                      <td className="p-3 text-muted-foreground">{formatDateTime(payment.paidAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {data !== undefined && data.pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => {
+                setPage((current) => current - 1);
+              }}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= data.pagination.totalPages}
+              onClick={() => {
+                setPage((current) => current + 1);
+              }}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TransactionsTab({ canManage }: { canManage: boolean }): React.JSX.Element {
+  const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['finance-transactions', page],
+    queryFn: () => financeApi.listTransactions({ page, search: '' }),
+  });
+
+  const invalidate = async (): Promise<void> => {
+    // Manual transactions feed into the summary KPIs too.
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['finance-transactions'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance-summary'] }),
+    ]);
+  };
+
+  return (
+    <div className="space-y-4">
+      {canManage && (
+        <div className="flex justify-end">
+          <Button
+            onClick={() => {
+              setDialogOpen(true);
+            }}
+          >
+            Record other income
+          </Button>
+        </div>
+      )}
+
+      <Card>
+        <CardContent className="p-0">
+          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
+          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {data !== undefined && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Type</th>
+                    <th className="p-3 font-medium">Description</th>
+                    <th className="p-3 text-right font-medium">Amount</th>
+                    <th className="p-3 font-medium">Occurred</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-center text-muted-foreground">
+                        No transactions found.
+                      </td>
+                    </tr>
+                  )}
+                  {data.items.map((transaction) => (
+                    <tr key={transaction.id} className="border-b border-border last:border-0">
+                      <td className="p-3">{TRANSACTION_TYPE_LABELS[transaction.type]}</td>
+                      <td className="p-3 text-muted-foreground">{transaction.description}</td>
+                      <td className="p-3 text-right tabular-nums">{formatCurrency(transaction.amount)}</td>
+                      <td className="p-3 text-muted-foreground">{formatDateTime(transaction.occurredAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {data !== undefined && data.pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>
+            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => {
+                setPage((current) => current - 1);
+              }}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= data.pagination.totalPages}
+              onClick={() => {
+                setPage((current) => current + 1);
+              }}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <RecordIncomeDialog
+        open={dialogOpen}
+        onClose={() => {
+          setDialogOpen(false);
+        }}
+        onSubmit={async (input: CreateOtherIncomeInput) => {
+          await financeApi.recordOtherIncome(input);
+          await invalidate();
+        }}
+      />
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { AuditService } from '../audit/audit.service';
 import { firstCallArg, lastCallArg } from '../common/testing/mock-args';
 import { Prisma } from '../generated/prisma/client';
 import { DeviceType, PaymentMethod, RepairStatus, StockMovementType, StockReferenceType, UserRole, UserStatus } from '../generated/prisma/enums';
@@ -88,7 +89,9 @@ describe('RepairsService', () => {
     productFindUnique = jest.fn(() => Promise.resolve({ sku: 'PRT-SCR-NIM7', sellingPrice: decimal('30.00'), isActive: true, deletedAt: null }));
     customerFindUnique = jest.fn(() => Promise.resolve({ deletedAt: null }));
     userFindUnique = jest.fn(() => Promise.resolve({ role: UserRole.TECHNICIAN, status: UserStatus.ACTIVE }));
-    paymentCreate = jest.fn(() => Promise.resolve({ id: 'payment-1', paymentNumber: 'PAY-00000042' }));
+    paymentCreate = jest.fn((args: { data: { amount: string } & Record<string, unknown> }) =>
+      Promise.resolve({ id: 'payment-1', paymentNumber: 'PAY-00000042', paidAt: new Date(), ...args.data, amount: decimal(args.data.amount) }),
+    );
     paymentAggregate = jest.fn(() => Promise.resolve({ _sum: { amount: null } }));
     movementCreateMany = jest.fn(() => Promise.resolve({ count: 1 }));
 
@@ -114,6 +117,7 @@ describe('RepairsService', () => {
       customer: { findUnique: customerFindUnique },
       user: { findUnique: userFindUnique },
       payment: { create: paymentCreate, aggregate: paymentAggregate, findMany: jest.fn(() => Promise.resolve([])) },
+      financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },
       stockMovement: { createMany: movementCreateMany },
       $executeRaw: executeRaw,
@@ -125,7 +129,11 @@ describe('RepairsService', () => {
     );
 
     const moduleRef = await Test.createTestingModule({
-      providers: [RepairsService, { provide: PrismaService, useValue: { ...client, $transaction: transaction } }],
+      providers: [
+        RepairsService,
+        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
+      ],
     }).compile();
 
     service = moduleRef.get(RepairsService);

@@ -649,8 +649,9 @@ drift from what it is the sum of. A discount larger than the thing it discounts 
 (422) - including when removing a line would strand an order-level discount above the new
 subtotal, which says so rather than silently reducing it.
 
-`tax` is an amount rather than a rate because there is nowhere to store a rate; a
-configurable default belongs with the settings work in Phase 13.
+`tax` is an amount rather than a rate: nothing in the orders workflow reads a configurable
+rate from [Settings](#settings) today, and inventing that wiring here would be scope this
+module was never asked to own.
 
 Payments are only accepted against a `CONFIRMED` or `COMPLETED` order - nothing has been
 agreed on a draft - and overpayment is refused. `paymentStatus` is derived from the amounts;
@@ -823,6 +824,299 @@ Sorting is restricted to `receivedAt`, `completedAt`, `expectedCompletionAt`,
 
 ---
 
+## Returns
+
+| Endpoint                                   | Roles                  |
+| ------------------------------------------ | ---------------------- |
+| `GET /api/v1/returns`                      | any authenticated user |
+| `GET /api/v1/returns/:id`                  | any authenticated user |
+| `GET /api/v1/returns/:id/payments`         | any authenticated user |
+| `POST /api/v1/returns`                     | ADMIN, MANAGER, STAFF  |
+| `PATCH /api/v1/returns/:id`                | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/returns/:id/items`           | ADMIN, MANAGER, STAFF  |
+| `PATCH /api/v1/returns/:id/items/:itemId`  | ADMIN, MANAGER, STAFF  |
+| `DELETE /api/v1/returns/:id/items/:itemId` | ADMIN, MANAGER, STAFF  |
+| `POST /api/v1/returns/:id/approve`         | ADMIN, MANAGER         |
+| `POST /api/v1/returns/:id/reject`          | ADMIN, MANAGER         |
+| `POST /api/v1/returns/:id/complete`        | ADMIN, MANAGER         |
+
+Raising a return is counter work, so staff can do it. Deciding whether the shop takes the
+goods back, and handing money over, is not: approval, rejection and completion are limited
+to ADMIN and MANAGER, because that is the point at which stock and cash actually move.
+
+### The workflow
+
+```text
+  PENDING --approve--> APPROVED --complete--> COMPLETED
+     |
+     +---reject--> REJECTED
+```
+
+A return is raised against a **completed** order (422 otherwise - a draft or a cancelled
+order never delivered goods to take back). Approval is a separate step from completion on
+purpose: it is the point at which the shop commits to the return, and separating it lets the
+two decisions sit with different people. Nothing moves on approval - no stock, no money.
+Only on completion do goods come back and the refund go out, in one transaction, so a refund
+can never exist for goods that were not restored, or the reverse.
+
+`REJECTED` and `COMPLETED` are both final. A rejected return releases its claim on the
+goods, so the same units are open to be claimed by another return; a completed one has
+already moved stock and money and cannot be replayed.
+
+### What a line has left to return
+
+Every return line is priced against **what the order line was actually charged**, net of
+its own discount - not the catalogue price. A return can only take back what an order line
+has left: the sum of every return already raised against that line (pending, approved or
+completed) is checked before a new claim is accepted, and a rejected return does not count,
+since the shop never took those goods back.
+
+Every claim on an order line is checked with the **order's row locked**, so two returns
+raised against the same line at the same instant cannot both succeed for more than the line
+actually sold - twenty attempts at two units each against six units sold produces exactly
+three successes and seventeen refusals, and there is a test for exactly that.
+
+### Refund rounding
+
+A line of three units charged 50.00 cannot be split into three equal refunds - a third is
+16.666..., which has no exact two-decimal form. Refunding a third three times over would
+either short the customer a cent or overpay the shop's till by one.
+
+The rule: **taking back the last of a line refunds exactly what is left of it**. Earlier
+partial returns are proportional and rounded; the final one sweeps up the remainder. However
+a line is broken up - one return, or five - the refunds always sum to precisely what was
+charged. This lives as pure, dependency-free functions in `return-refunds.ts`, tested
+directly against the rounding boundary rather than only through the API.
+
+### Money: only what was actually collected
+
+`refundAmount` is the **credit** - what the returned goods were charged. `paidBackAmount` is
+what actually went back, which can be smaller: an order that was only half paid can only be
+refunded half, because the rest of the credit stands against goods nobody had paid for in
+the first place. `outstandingCredit` is the difference, and it is reported rather than
+hidden - the shop can see it as a store credit or a write-off, whichever it decides.
+
+Refunds already paid against the same order are counted before a new one is calculated, so
+two returns on the same order cannot together hand back more than was collected. Once
+everything collected has gone back, the order's `paymentStatus` becomes `REFUNDED`; a
+part-refunded order is left alone.
+
+A refund of exactly zero is a real, valid outcome - goods returned against an order that was
+never paid for - and the database rejects a payment of nothing, so on that path no `Payment`
+row is written at all. The goods still come back onto the shelf regardless: restocking and
+refunding are two separate questions.
+
+### Restocking
+
+`restock` on each line decides whether the goods go back on the shelf. False for anything
+that comes back broken: the customer is still credited in full, but the units are written
+off rather than put back into sellable stock, so the ledger never claims stock the shop
+cannot actually sell. Only sellable lines produce a `RETURN_IN` movement.
+
+Restoring stock reuses the shared inventory module from orders and repairs
+(`common/inventory/stock-operations.ts`) rather than a fourth copy of the same logic. Unlike
+reserving or consuming, restoring can never be refused - stock going up cannot breach the
+non-negative or reserved-within-quantity constraints - so it is a plain conditional update
+with nothing to reject.
+
+### Concurrency
+
+Every transition is a conditional `UPDATE` on the return row, the same pattern as orders and
+repairs. Completing a return twice at the same moment restores stock once, writes one
+refund, and the loser gets a conflict rather than a second payment. An approval and a
+rejection raised at the same instant settle on exactly one outcome.
+
+### Query parameters
+
+`status`, `reason`, `orderId`, `customerId`, `createdById`, `createdFrom` / `createdTo`,
+`completedFrom` / `completedTo`, and search across `returnNumber` and `reasonNote`.
+
+Sorting is restricted to `createdAt`, `completedAt`, `returnNumber`, `refundAmount` and
+`status`.
+
+---
+
+## Finance
+
+| Endpoint                               | Roles                  |
+| -------------------------------------- | ---------------------- |
+| `GET /api/v1/finance/expenses`         | any authenticated user |
+| `GET /api/v1/finance/expenses/:id`     | any authenticated user |
+| `POST /api/v1/finance/expenses`        | ADMIN, MANAGER         |
+| `PATCH /api/v1/finance/expenses/:id`   | ADMIN, MANAGER         |
+| `DELETE /api/v1/finance/expenses/:id`  | ADMIN, MANAGER         |
+| `GET /api/v1/finance/payments`         | any authenticated user |
+| `GET /api/v1/finance/payments/:id`     | any authenticated user |
+| `GET /api/v1/finance/transactions`     | any authenticated user |
+| `GET /api/v1/finance/transactions/:id` | any authenticated user |
+| `POST /api/v1/finance/transactions`    | ADMIN, MANAGER         |
+| `GET /api/v1/finance/summary`          | any authenticated user |
+
+Expenses are a back-office record, so recording, correcting and removing one sits at the
+same bar as approving a return or taking a repair payment. Reading is open to any
+authenticated user, like every other module.
+
+### One ledger, fed by every module that moves money
+
+`FinancialTransaction` is a single table that every source of income or outflow writes
+into: an order payment writes a `SALE` entry, a repair payment writes `REPAIR_PAYMENT`, a
+return refund writes `REFUND`, and recording an expense writes `EXPENSE` - all in the same
+transaction as the write that earns them, so the ledger and the record it describes can
+never disagree. The one entry a caller may write directly is `OTHER_INCOME`: money that
+arrived outside a sale, a repair or a return, with nowhere else to be recorded. Every other
+type is system-derived and cannot be posted through the API - forging a `SALE` entry with
+no order behind it would let the ledger claim money nothing backs.
+
+Financial summaries read this ledger rather than re-deriving totals by joining every source
+table on every request, which is what it exists for. Only the expense-by-category breakdown
+comes from `Expense` directly, since category is not something the ledger carries.
+
+### Expenses keep their ledger entry in step
+
+Recording an expense writes its `EXPENSE` ledger entry in the same transaction. Correcting
+an expense's amount, description or date updates the ledger entry to match, rather than
+leaving a stale copy behind; removing an expense removes both rows together. A category
+change alone leaves the ledger's amount, description and date exactly as they were, since
+none of those changed.
+
+### Money actually collected, not money nominally owed
+
+The summary's income figures are amounts that were actually paid, not order totals or
+invoiced amounts: an order confirmed but never paid contributes nothing until a payment is
+recorded against it. Refunds are read separately from income, so a return does not quietly
+shrink a sale figure it should instead be weighed against - `netRevenue` is income net of
+refunds, and `netPosition` is that figure net of expenses.
+
+### Query parameters
+
+Expenses: `category`, `createdById`, `expenseFrom` / `expenseTo`, and search across
+`expenseNumber` and `description`. Sorting is restricted to `expenseDate`, `amount`,
+`category` and `createdAt`.
+
+Payments: `method`, `referenceType`, `createdById`, `paidFrom` / `paidTo`, and search across
+`paymentNumber` and `reference`. Sorting is restricted to `paidAt`, `amount` and `method`.
+
+Transactions: `type`, `referenceType`, `createdById`, `occurredFrom` / `occurredTo`, and
+search across `description`. Sorting is restricted to `occurredAt`, `amount` and `type`.
+
+Summary: an optional `from` / `to` window; omitted, it reports over all time.
+
+---
+
+## Dashboard
+
+`GET /api/v1/dashboard` returns one KPI bundle, open to any authenticated user. Every figure
+is either counted directly or reused from the module that owns it - `FinanceService.summary()`
+for money, `StockService` for inventory - rather than re-derived, so the dashboard can never
+disagree with the page a figure came from.
+
+```text
+sales             totalOrders, today, thisMonth, grossRevenue
+finance           expenses, netPosition
+inventory         the stock summary: totalProducts, totalUnits, valueAtCost, valueAtRetail,
+                  lowStockCount, outOfStockCount
+repairs           active, completed, statusDistribution (every RepairStatus, zero-filled)
+returns           pending
+customers         total
+recentSales       the ten most recently completed orders
+recentStockMovements   the ten most recent movements, reusing the stock module's own listing
+salesChart        revenue for each of the last 14 days, zero-filled so the chart has no gaps
+```
+
+`totalOrders` is a count; `grossRevenue` is money - kept as two figures on purpose, since a
+dashboard that only said "sales: 6" or only said "sales: $600.00" would be answering half the
+question. `today` and `thisMonth` are scoped to `SALE` ledger entries specifically, not all
+income, so a repair payment or a manual entry does not inflate what the till actually rang up.
+
+Every underlying query is a single aggregate - counts, sums and one `GROUP BY` for the chart -
+run in parallel with `Promise.all`, never a loop that fetches rows to fold in JavaScript.
+
+## Reports
+
+| Endpoint                           | Roles                  |
+| ---------------------------------- | ---------------------- |
+| `GET /api/v1/reports/sales`        | any authenticated user |
+| `GET /api/v1/reports/inventory`    | any authenticated user |
+| `GET /api/v1/reports/top-products` | any authenticated user |
+
+Reports break a figure the dashboard already shows down further - by period, by category, by
+product - rather than introducing new totals to keep in sync with it.
+
+**`sales`** - revenue over an optional `from` / `to` window, grouped by `groupBy` (`day`,
+`week` or `month`; default `day`). Each point carries its own order count, subtotal, discount,
+tax and total; the response also carries the sum of every point as `totals`, so a caller never
+has to fold the series itself. An empty window reports no points and zeroed totals rather than
+a fabricated one.
+
+**`inventory`** - the stock valuation broken down by category: product count, units, value at
+cost and at retail, and low/out-of-stock counts, one row per category. `totals` is the same
+catalogue-wide `StockSummary` the dashboard and `/api/v1/stock/summary` already return, not a
+second computation of it.
+
+**`top-products`** - the best-selling products by revenue over an optional `from` / `to`
+window, each with units sold and revenue, capped at `limit` (default 10, maximum 50).
+
+`sales` and `top-products` both key off `Order.completedAt`, the same column revenue reporting
+uses everywhere else in this API - a draft raised last month and only completed today belongs
+to today's figures, not last month's.
+
+---
+
+## Audit
+
+| Endpoint                | Roles |
+| ----------------------- | ----- |
+| `GET /api/v1/audit`     | ADMIN |
+| `GET /api/v1/audit/:id` | ADMIN |
+
+The append-only trail every money- and security-relevant action writes into, in the same
+transaction as the change it describes. `record()` takes an optional transaction client, so a
+call inside an existing `$transaction` writes atomically with it: if the transaction rolls
+back, no orphaned entry claims something happened that did not.
+
+Tracked today: `LOGIN` / `LOGIN_FAILED` / `LOGOUT`, user creation / `ROLE_CHANGED` /
+`STATUS_CHANGED`, product `CREATE` / `UPDATE` / `DELETE`, `STOCK_ADJUSTED`, `ORDER_COMPLETED`
+/ `ORDER_CANCELLED`, `RETURN_APPROVED` / `RETURN_COMPLETED`, `REPAIR_STATUS_CHANGED`,
+`PAYMENT_RECORDED` (orders, repairs and return refunds alike), and expense `CREATE` / `UPDATE`
+/ `DELETE`. `userId` is `null` for an event with no authenticated actor, such as a failed
+login against an unknown address, and stays `null` once an actor's account is later removed -
+the row survives on `ON DELETE SET NULL`, because the trail is what a real audit log is for.
+
+`metadata` carries business context only - amounts, statuses, what changed - never a
+password, a JWT or a refresh token. Reading the trail is ADMIN-only, tighter than every other
+read endpoint in this API, since it is the one place that can show who did what, from where,
+across the whole system.
+
+### Query parameters
+
+`userId`, `action`, `entity`, `entityId`, `createdFrom` / `createdTo`. Sorting is restricted
+to `createdAt`.
+
+## Settings
+
+| Endpoint                       | Roles          |
+| ------------------------------ | -------------- |
+| `GET /api/v1/settings`         | ADMIN, MANAGER |
+| `GET /api/v1/settings/:key`    | ADMIN, MANAGER |
+| `PUT /api/v1/settings/:key`    | ADMIN          |
+| `DELETE /api/v1/settings/:key` | ADMIN          |
+
+System configuration, keyed by name rather than id: a caller wants "the setting called
+`low_stock_alert_threshold`", not a uuid it has to look up first. `PUT` creates the setting if
+the key is new and replaces it if not, so there is one write verb for both rather than a
+create/update split a config store has no use for.
+
+`value` is always stored as text; `valueType` (`STRING` / `NUMBER` / `BOOLEAN` / `JSON`) says
+how to decode it. A write is rejected if `value` does not parse as its declared type - a
+`NUMBER` that is not a number, a `BOOLEAN` that is not `true` or `false`, `JSON` that does not
+parse. Every read carries `parsedValue`, decoded from `value` at read time rather than kept as
+a second stored column that could drift from the text it was parsed from.
+
+Writing a setting is ADMIN-only, the same bar as changing a user's role: a setting can change
+how the whole deployment behaves. Every create, replace and removal writes an audit entry.
+
+---
+
 ## Build status
 
 Delivered so far:
@@ -869,26 +1163,37 @@ Delivered so far:
   completion, repair payments guarded by a row lock, and a workbench listing with
   open/overdue/unassigned filters. The reservation machinery is now shared with orders
   rather than duplicated. See [Repairs](#repairs).
+- **Phase 10 — Returns.** The pending/approved/rejected/completed workflow, refunds priced
+  against what an order line actually charged with exact rounding across partial returns,
+  restocking that is separate from refunding, refunds capped at what was actually collected,
+  and inventory restoration reusing the shared stock-operations module for a third time
+  rather than a third copy. See [Returns](#returns).
+- **Phase 11 — Finance.** Expenses with a document number and a ledger entry kept in step
+  across correction and removal, a `FinancialTransaction` ledger fed by every module that
+  moves money (order payments, repair payments, return refunds, expenses, and manually
+  recorded other income), and summaries derived from that ledger rather than re-joining
+  every source table. See [Finance](#finance).
+- **Phase 12 — Dashboard & Reports.** One KPI bundle reusing the finance and stock summaries
+  rather than re-deriving them, plus a sales report, an inventory valuation report and a
+  top-products report, each grouping in the database rather than folding rows in JavaScript.
+  See [Dashboard](#dashboard) and [Reports](#reports).
+- **Phase 13 — Audit & Settings.** An append-only trail written atomically alongside every
+  security- and money-relevant change across every module - authentication, users, products,
+  stock, orders, repairs, returns and finance - and a keyed settings store with type-checked
+  values decoded at read time. See [Audit](#audit) and [Settings](#settings).
 
 Not yet implemented (each is scheduled work, not a stub):
 
-returns (Phase 10) · finance (11) · dashboard and reports (12) ·
-audit and settings (13) · `apps/web` (14) and all UI phases (15-23) · full E2E suite (24) ·
-performance and security review (25) · production build (26).
+`apps/web` (Phase 14) and all UI phases (15-23) · full E2E suite (24) · performance and
+security review (25) · production build (26).
 
 A few items are deliberately deferred rather than half-built, each to the phase that owns
 it:
 
 - No password-change or password-reset endpoint yet.
-- Nothing is written to `AuditLog` - the audit service lands in Phase 13, which is where
-  those call sites are added. The `StockMovement` ledger already records who moved stock,
-  what moved, and against which document, so the trail for stock and sales is not blank in
-  the meantime.
-- Order and repair payments do not yet write a `FinancialTransaction`; that ledger and the
-  summaries built on it are Phase 11.
-- An order with a payment recorded against it cannot be cancelled, because refunding it
-  needs the returns (Phase 10) and finance (Phase 11) workflows. The refusal is explicit
-  and explains itself rather than fabricating a refund that never happened.
+- An order with a payment recorded against it cannot be cancelled; the way to unwind it is
+  the returns workflow, which refunds and restocks together rather than one silently
+  happening without the other.
 - `Order.paymentStatus` never becomes `REFUNDED` here; only a return sets it.
 - A repair has no warranty or rework flow: a device that comes back is taken in again as a
   new repair. The schema has nowhere to record the link, and inventing one would be

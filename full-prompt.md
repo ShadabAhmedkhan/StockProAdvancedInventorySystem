@@ -20,11 +20,12 @@ After each phase:
 6. Fix every error introduced by the phase.
 7. Give me:
 
-   * files created
-   * files modified
-   * commands executed
-   * test/build results
-   * remaining work
+   - files created
+   - files modified
+   - commands executed
+   - test/build results
+   - remaining work
+
 8. Stop and wait for the next phase instruction.
 
 Do not leave placeholder implementations, fake APIs, commented-out production logic, or TODOs unless explicitly documented as future-scope work.
@@ -39,20 +40,20 @@ Build a full-stack inventory, sales, repair, supplier, customer, return, and fin
 
 Primary business areas:
 
-* Authentication
-* Users
-* Dashboard
-* Customers
-* Suppliers
-* Products
-* Stock / Inventory
-* Orders / Sales
-* Repairs
-* Returns
-* Finance
-* Reports
-* Audit history
-* Settings
+- Authentication
+- Users
+- Dashboard
+- Customers
+- Suppliers
+- Products
+- Stock / Inventory
+- Orders / Sales
+- Repairs
+- Returns
+- Finance
+- Reports
+- Audit history
+- Settings
 
 ---
 
@@ -62,10 +63,10 @@ Use:
 
 ## Monorepo
 
-* pnpm workspaces
-* Node.js 22+
-* TypeScript
-* Single root `pnpm-lock.yaml`
+- pnpm workspaces
+- Node.js 22+
+- TypeScript
+- Single root `pnpm-lock.yaml`
 
 Structure:
 
@@ -95,21 +96,21 @@ stock-pro/
 
 Use:
 
-* NestJS
-* TypeScript
-* PostgreSQL
-* Prisma ORM
-* JWT authentication
-* Access tokens
-* Refresh tokens
-* Argon2 password hashing
-* class-validator
-* class-transformer
-* Swagger/OpenAPI
-* NestJS ConfigModule
-* NestJS Throttler
-* Jest
-* Supertest
+- NestJS
+- TypeScript
+- PostgreSQL
+- Prisma ORM
+- JWT authentication
+- Access tokens
+- Refresh tokens
+- Argon2 password hashing
+- class-validator
+- class-transformer
+- Swagger/OpenAPI
+- NestJS ConfigModule
+- NestJS Throttler
+- Jest
+- Supertest
 
 API base path:
 
@@ -129,19 +130,19 @@ apps/api
 
 Use:
 
-* Next.js
-* App Router
-* TypeScript
-* React
-* Tailwind CSS
-* shadcn/ui
-* React Hook Form
-* Zod
-* TanStack Query
-* Zustand only where global client state is genuinely required
-* Recharts for charts
-* Lucide icons
-* Playwright for E2E tests
+- Next.js
+- App Router
+- TypeScript
+- React
+- Tailwind CSS
+- shadcn/ui
+- React Hook Form
+- Zod
+- TanStack Query
+- Zustand only where global client state is genuinely required
+- Recharts for charts
+- Lucide icons
+- Playwright for E2E tests
 
 Frontend application:
 
@@ -157,13 +158,13 @@ Use PostgreSQL with Prisma.
 
 Create proper:
 
-* primary keys
-* foreign keys
-* unique constraints
-* indexes
-* enums
-* timestamps
-* soft-delete strategy where appropriate
+- primary keys
+- foreign keys
+- unique constraints
+- indexes
+- enums
+- timestamps
+- soft-delete strategy where appropriate
 
 Every major business table should normally contain:
 
@@ -582,16 +583,16 @@ AuditLog
 
 Track important events such as:
 
-* login
-* logout
-* user creation
-* role changes
-* product changes
-* inventory adjustments
-* order completion
-* returns
-* repair status changes
-* financial changes
+- login
+- logout
+- user creation
+- role changes
+- product changes
+- inventory adjustments
+- order completion
+- returns
+- repair status changes
+- financial changes
 
 Do not store passwords, JWTs, refresh tokens, or sensitive secrets in audit metadata.
 
@@ -666,14 +667,14 @@ common/
 
 Create:
 
-* global validation
-* centralized error handling
-* structured API responses
-* request IDs
-* pagination helpers
-* authentication guard
-* role guard
-* current-user decorator
+- global validation
+- centralized error handling
+- structured API responses
+- request IDs
+- pagination helpers
+- authentication guard
+- role guard
+- current-user decorator
 
 Do not over-engineer with unnecessary abstraction.
 
@@ -736,16 +737,16 @@ GET  /api/v1/auth/me
 
 Requirements:
 
-* hash password with Argon2
-* short-lived access JWT
-* longer-lived refresh token
-* rotate refresh tokens
-* hash refresh tokens in database
-* reject revoked/expired tokens
-* rate-limit login
-* generic invalid-login errors
-* never return password hashes
-* validate environment secrets
+- hash password with Argon2
+- short-lived access JWT
+- longer-lived refresh token
+- rotate refresh tokens
+- hash refresh tokens in database
+- reject revoked/expired tokens
+- rate-limit login
+- generic invalid-login errors
+- never return password hashes
+- validate environment secrets
 
 ---
 
@@ -772,10 +773,10 @@ Build CRUD + business endpoints for:
 
 All list endpoints should support appropriate:
 
-* pagination
-* searching
-* filtering
-* sorting
+- pagination
+- searching
+- filtering
+- sorting
 
 Do not expose unrestricted arbitrary database sorting/filtering.
 
@@ -886,11 +887,11 @@ Settings
 
 Support:
 
-* responsive desktop
-* tablet
-* mobile
-* collapsible sidebar
-* dark/light mode
+- responsive desktop
+- tablet
+- mobile
+- collapsible sidebar
+- dark/light mode
 
 ---
 
@@ -923,22 +924,22 @@ Do not create giant page components containing all logic.
 
 Use:
 
-* React Hook Form
-* Zod
+- React Hook Form
+- Zod
 
 Create proper validation for:
 
-* login
-* registration
-* customer
-* supplier
-* product
-* stock adjustment
-* order
-* repair
-* return
-* expense
-* users
+- login
+- registration
+- customer
+- supplier
+- product
+- stock adjustment
+- order
+- repair
+- return
+- expense
+- users
 
 Validation schemas shared with backend should live inside:
 
@@ -1008,20 +1009,20 @@ Do not scatter raw `fetch()` calls throughout components.
 
 Apply:
 
-* password hashing
-* JWT secret validation
-* refresh token rotation
-* RBAC
-* DTO validation
-* SQL injection protection through Prisma
-* API rate limiting
-* HTTP security headers
-* safe CORS configuration
-* no stack trace leakage in production
-* input sanitization where needed
-* audit logging
-* no secrets committed
-* secure production cookie strategy if refresh tokens use cookies
+- password hashing
+- JWT secret validation
+- refresh token rotation
+- RBAC
+- DTO validation
+- SQL injection protection through Prisma
+- API rate limiting
+- HTTP security headers
+- safe CORS configuration
+- no stack trace leakage in production
+- input sanitization where needed
+- audit logging
+- no secrets committed
+- secure production cookie strategy if refresh tokens use cookies
 
 Never put sensitive tokens into browser localStorage unless the selected authentication architecture explicitly requires it and the security implications are addressed.
 
@@ -1167,9 +1168,9 @@ Use pnpm workspace filtering appropriately.
 
 Use:
 
-* ESLint
-* Prettier
-* strict TypeScript
+- ESLint
+- Prettier
+- strict TypeScript
 
 Recommended Prettier configuration:
 
@@ -1205,14 +1206,14 @@ unless absolutely necessary and justified.
 
 Backend:
 
-* unit tests
-* integration tests
-* E2E tests
+- unit tests
+- integration tests
+- E2E tests
 
 Frontend:
 
-* component/unit testing where valuable
-* Playwright E2E
+- component/unit testing where valuable
+- Playwright E2E
 
 Critical E2E scenarios:
 
@@ -1303,16 +1304,16 @@ Follow exactly this order.
 
 Only:
 
-* initialize root project
-* pnpm workspace
-* folder structure
-* shared TypeScript config
-* ESLint
-* Prettier
-* `.gitignore`
-* `.env.example`
-* README skeleton
-* verify root tooling
+- initialize root project
+- pnpm workspace
+- folder structure
+- shared TypeScript config
+- ESLint
+- Prettier
+- `.gitignore`
+- `.env.example`
+- README skeleton
+- verify root tooling
 
 No business logic yet.
 
@@ -1328,16 +1329,16 @@ apps/api
 
 Configure:
 
-* NestJS
-* ConfigModule
-* environment validation
-* `/api/v1`
-* Swagger
-* CORS
-* validation pipe
-* exception handling
-* health endpoint
-* request ID
+- NestJS
+- ConfigModule
+- environment validation
+- `/api/v1`
+- Swagger
+- CORS
+- validation pipe
+- exception handling
+- health endpoint
+- request ID
 
 Verify backend starts cleanly.
 
@@ -1347,12 +1348,12 @@ Verify backend starts cleanly.
 
 Create:
 
-* Docker PostgreSQL
-* Prisma
-* schema
-* migrations
-* seed infrastructure
-* PrismaModule
+- Docker PostgreSQL
+- Prisma
+- schema
+- migrations
+- seed infrastructure
+- PrismaModule
 
 Build initial schema correctly before business endpoints.
 
@@ -1362,17 +1363,17 @@ Build initial schema correctly before business endpoints.
 
 Implement:
 
-* users
-* roles
-* registration
-* login
-* refresh
-* logout
-* current user
-* guards
-* decorators
-* throttling
-* tests
+- users
+- roles
+- registration
+- login
+- refresh
+- logout
+- current user
+- guards
+- decorators
+- throttling
+- tests
 
 Do not move forward until auth E2E tests pass.
 
@@ -1394,9 +1395,9 @@ Implement supplier module and tests.
 
 Implement:
 
-* categories
-* brands
-* products
+- categories
+- brands
+- products
 
 Add searching, filtering and pagination.
 
@@ -1406,13 +1407,13 @@ Add searching, filtering and pagination.
 
 Implement:
 
-* inventory records
-* stock movements
-* adjustments
-* low stock
-* out of stock
-* stock history
-* transaction safety
+- inventory records
+- stock movements
+- adjustments
+- low stock
+- out of stock
+- stock history
+- transaction safety
 
 Add extensive tests.
 
@@ -1422,14 +1423,14 @@ Add extensive tests.
 
 Implement:
 
-* orders
-* order items
-* totals
-* payments
-* completion
-* cancellation
-* inventory deduction
-* transaction safety
+- orders
+- order items
+- totals
+- payments
+- completion
+- cancellation
+- inventory deduction
+- transaction safety
 
 ---
 
@@ -1449,10 +1450,10 @@ Implement returns and inventory restoration.
 
 Implement:
 
-* expenses
-* payments
-* financial transactions
-* financial summaries
+- expenses
+- payments
+- financial transactions
+- financial summaries
 
 ---
 
@@ -1478,14 +1479,14 @@ apps/web
 
 Set up:
 
-* Next.js
-* Tailwind
-* shadcn/ui
-* providers
-* TanStack Query
-* API client
-* authentication foundation
-* layouts
+- Next.js
+- Tailwind
+- shadcn/ui
+- providers
+- TanStack Query
+- API client
+- authentication foundation
+- layouts
 
 No complete business pages yet.
 
@@ -1495,11 +1496,11 @@ No complete business pages yet.
 
 Implement:
 
-* login
-* register
-* logout
-* authenticated session
-* protected routing
+- login
+- register
+- logout
+- authenticated session
+- protected routing
 
 ---
 
@@ -1519,12 +1520,12 @@ Implement complete frontend CRUD workflows.
 
 Implement:
 
-* product catalog
-* product forms
-* inventory table
-* stock movements
-* stock adjustment UI
-* low-stock indicators
+- product catalog
+- product forms
+- inventory table
+- stock movements
+- stock adjustment UI
+- low-stock indicators
 
 ---
 

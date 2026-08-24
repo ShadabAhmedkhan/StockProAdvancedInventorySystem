@@ -89,7 +89,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoke the current session' })
   async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<{ success: true }> {
-    await this.authService.logout(this.readRefreshCookie(request));
+    await this.authService.logout(this.readRefreshCookie(request), sessionContext(request));
     this.clearRefreshCookie(response);
 
     return { success: true };
