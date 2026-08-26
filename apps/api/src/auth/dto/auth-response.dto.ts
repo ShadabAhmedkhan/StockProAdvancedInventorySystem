@@ -6,6 +6,7 @@ import type { UserRole, UserStatus } from '../../generated/prisma/enums';
  */
 export interface PublicUser {
   id: string;
+  organizationId: string;
   firstName: string;
   lastName: string;
   email: string;

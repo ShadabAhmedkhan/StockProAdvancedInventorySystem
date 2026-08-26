@@ -1,7 +1,7 @@
 import request from 'supertest';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { DeviceType, PaymentMethod, RepairStatus, StockMovementType, StockReferenceType, UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface Identified {
   id: string;
@@ -135,10 +135,10 @@ describe('Repairs (e2e)', () => {
     });
 
     const admin = await signInAs(context, 'rep-admin', UserRole.ADMIN);
-    const staff = await signInAs(context, 'rep-staff', UserRole.STAFF);
-    const technician = await signInAs(context, 'rep-tech', UserRole.TECHNICIAN);
-
     adminToken = admin.accessToken;
+    const staff = await inviteTeammate(context, adminToken, 'rep-staff', UserRole.STAFF);
+    const technician = await inviteTeammate(context, adminToken, 'rep-tech', UserRole.TECHNICIAN);
+
     staffToken = staff.accessToken;
     staffId = staff.id;
     technicianToken = technician.accessToken;

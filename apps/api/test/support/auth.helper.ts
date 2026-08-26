@@ -5,11 +5,11 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
-import type { AuthResult } from '../../src/auth/dto/auth-response.dto';
+import type { AuthResult, PublicUser } from '../../src/auth/dto/auth-response.dto';
 import type { ApiResponse } from '../../src/common/interfaces/api-response.interface';
 import { appConfig, type AppConfiguration } from '../../src/config/app.config';
 import { REFRESH_COOKIE_NAME } from '../../src/config/jwt.config';
-import type { UserRole } from '../../src/generated/prisma/enums';
+import { UserRole, UserStatus } from '../../src/generated/prisma/enums';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 export const TEST_PASSWORD = 'CorrectHorse1';
@@ -64,7 +64,7 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     }
   }
 
-  const app = moduleRef.createNestApplication();
+  const app = moduleRef.createNestApplication({ rawBody: true });
   configureApp(app, app.get<AppConfiguration>(appConfig.KEY));
   await app.init();
 
@@ -108,7 +108,7 @@ export async function registerUser(context: TestApp, label: string): Promise<Reg
 
   const response = await request(context.server)
     .post('/api/v1/auth/register')
-    .send({ firstName: 'Test', lastName: label, email, password: TEST_PASSWORD })
+    .send({ firstName: 'Test', lastName: label, email, password: TEST_PASSWORD, organizationName: `Org ${label} ${context.run}` })
     .expect(201);
 
   const body = response.body as ApiResponse<AuthResult>;
@@ -136,17 +136,22 @@ export function cookieValue(cookie: string): string {
 }
 
 /**
- * Registers a user, gives them `role`, and returns a session whose access
- * token actually carries that role.
+ * Registers a brand-new organization and gives its founding user `role`,
+ * returning a session whose access token actually carries that role.
  *
- * Self-registration always produces STAFF, and the role travels in the token,
- * so a promotion is only visible after a fresh sign-in. Anything other than
- * STAFF therefore costs one login against the five-per-minute allowance.
+ * Self-registration always creates a new organization and makes its founder
+ * ADMIN, so anything other than ADMIN is a direct DB promotion followed by a
+ * fresh sign-in (the role travels in the token, so a promotion is only
+ * visible after that). This account is the *only* member of its organization
+ * - a test that needs several differently-roled accounts able to see each
+ * other's data (almost every RBAC test) wants {@link inviteTeammate} for
+ * every account after the first, not repeated calls to this function, which
+ * would scatter them across separate organizations.
  */
 export async function signInAs(context: TestApp, label: string, role: UserRole): Promise<RegisteredUser> {
   const user = await registerUser(context, label);
 
-  if (role === 'STAFF') {
+  if (role === UserRole.ADMIN) {
     return user;
   }
 
@@ -156,4 +161,45 @@ export async function signInAs(context: TestApp, label: string, role: UserRole):
   const body = login.body as ApiResponse<AuthResult>;
 
   return { ...user, accessToken: body.data.accessToken, refreshCookie: refreshCookie(login) ?? user.refreshCookie };
+}
+
+/**
+ * Adds a teammate to `adminToken`'s organization via the authenticated
+ * admin-invite endpoint (`POST /users`), without signing them in - the
+ * counterpart to {@link registerUser}, which always founds its own separate
+ * organization. Use this for every account after a file's first that needs
+ * to share data with it. Prefer this over {@link inviteTeammate} whenever the
+ * caller only needs the row (its id, to act on as an admin) rather than a
+ * session of its own - login has its own 5-per-minute throttle shared across
+ * a whole spec file, and a status other than ACTIVE cannot log in anyway.
+ */
+export async function createTeammate(context: TestApp, adminToken: string, label: string, role: UserRole, status: UserStatus = UserStatus.ACTIVE): Promise<{ id: string; email: string }> {
+  const email = emailFor(context, label);
+
+  const created = await request(context.server)
+    .post('/api/v1/users')
+    .set('Authorization', `Bearer ${adminToken}`)
+    .send({ firstName: 'Test', lastName: label, email, password: TEST_PASSWORD, role, status })
+    .expect(201);
+
+  const body = created.body as ApiResponse<PublicUser>;
+  context.createdUserIds.push(body.data.id);
+
+  return { id: body.data.id, email };
+}
+
+/** {@link createTeammate}, then signs the new account in - for a caller that needs a session in its own right, not just the row. */
+export async function inviteTeammate(context: TestApp, adminToken: string, label: string, role: UserRole, status: UserStatus = UserStatus.ACTIVE): Promise<RegisteredUser> {
+  const teammate = await createTeammate(context, adminToken, label, role, status);
+
+  if (status !== UserStatus.ACTIVE) {
+    // An inactive account cannot log in; a caller building e.g. a SUSPENDED
+    // fixture wants the id/email, not a session that can't be created.
+    return { ...teammate, accessToken: '', refreshCookie: '' };
+  }
+
+  const login = await request(context.server).post('/api/v1/auth/login').send({ email: teammate.email, password: TEST_PASSWORD }).expect(200);
+  const loginBody = login.body as ApiResponse<AuthResult>;
+
+  return { ...teammate, accessToken: loginBody.data.accessToken, refreshCookie: refreshCookie(login) ?? '' };
 }

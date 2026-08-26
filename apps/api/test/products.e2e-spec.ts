@@ -3,7 +3,7 @@ import request from 'supertest';
 import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, registerUser, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 /** The API shape of a product, with money as exact decimal strings. */
 interface ProductResponse {
@@ -58,7 +58,7 @@ describe('Products (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'prod-admin', UserRole.ADMIN)).accessToken;
-    staffToken = (await registerUser(context, 'prod-staff')).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'prod-staff', UserRole.STAFF)).accessToken;
 
     const category = await request(context.server)
       .post('/api/v1/categories')
@@ -367,13 +367,15 @@ describe('Products (e2e)', () => {
   });
 
   describe('money representation across the whole catalogue', () => {
-    it('formats every seeded price as an exact two-decimal string', async () => {
+    it('formats a price with no exact binary representation as an exact two-decimal string', async () => {
+      await createProduct(adminToken, baseProduct('GLS', { costPrice: '1.05', sellingPrice: '7.50' }));
+
       const response = await request(context.server)
-        .get('/api/v1/products?search=Universal%20Tempered&limit=10')
+        .get(`/api/v1/products?search=${sku('GLS')}&limit=10`)
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(200);
       const body = response.body as ApiResponse<ProductResponse[]>;
-      const glass = body.data.find((row) => row.sku === 'ACC-GLS-UNIV');
+      const glass = body.data.find((row) => row.sku === sku('GLS'));
 
       // 1.05 has no exact binary representation; it must survive untouched.
       expect(glass?.costPrice).toBe('1.05');

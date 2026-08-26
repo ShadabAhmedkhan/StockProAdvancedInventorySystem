@@ -10,7 +10,10 @@ import { appConfig, type AppConfiguration } from './config/app.config';
 async function bootstrap(): Promise<void> {
   // Logs are buffered until the validated configuration tells us which levels
   // to keep, then replayed by useLogger().
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  // `rawBody: true` keeps the exact bytes of every request body on
+  // `req.rawBody` alongside Nest's normal parsed `req.body` - the billing
+  // webhook needs the untouched bytes to verify Stripe's signature.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, rawBody: true });
   const config = app.get<AppConfiguration>(appConfig.KEY);
 
   app.useLogger(config.logLevels);

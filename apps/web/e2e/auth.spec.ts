@@ -22,18 +22,20 @@ test.describe('authentication', () => {
     await expect(page.getByText(`Amara Okafor · ADMIN`)).toBeVisible();
   });
 
-  test('registering a new account signs them in as STAFF and lands on the dashboard', async ({ page }) => {
+  test('registering a new account creates a new organization and signs them in as its administrator', async ({ page }) => {
     const suffix = uniqueSuffix();
     await page.goto('/register');
+    await page.getByLabel('Organization name').fill(`E2E Org ${suffix}`);
     await page.getByLabel('First name').fill('E2E');
     await page.getByLabel('Last name').fill('Registrant');
     await page.getByLabel('Email').fill(`e2e.registrant.${suffix}@stockpro.test`);
     await page.getByLabel('Password').fill('Passw0rdPlaywright!');
     await page.getByRole('button', { name: 'Create account' }).click();
     await page.waitForURL('**/dashboard');
-    await expect(page.getByText(`E2E Registrant · STAFF`)).toBeVisible();
-    // A STAFF account has no access to the admin-only areas.
-    await expect(page.getByRole('link', { name: 'Audit' })).toHaveCount(0);
+    await expect(page.getByText(`E2E Registrant · ADMIN`)).toBeVisible();
+    // The registrant is the founding administrator of a brand-new org, so the
+    // admin-only areas are reachable - unlike a self-registered STAFF account.
+    await expect(page.getByRole('link', { name: 'Audit' })).toBeVisible();
   });
 });
 

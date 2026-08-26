@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService, type StockSummary } from '../stock/stock.service';
 import type { SalesReportQueryDto, SalesReportPeriod } from './dto/sales-report-query.dto';
@@ -101,7 +102,7 @@ export class ReportsService {
         FROM "Inventory" i
         JOIN "Product" p ON p."id" = i."productId"
         JOIN "Category" c ON c."id" = p."categoryId"
-        WHERE p."deletedAt" IS NULL
+        WHERE i."organizationId" = ${getCurrentOrgId()}::uuid AND p."deletedAt" IS NULL
         GROUP BY c."id", c."name"
         ORDER BY "valueAtRetail" DESC
       `,

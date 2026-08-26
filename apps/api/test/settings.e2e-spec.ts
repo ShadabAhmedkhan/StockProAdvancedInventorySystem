@@ -1,7 +1,7 @@
 import request from 'supertest';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { SettingValueType, UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface SettingBody {
   id: string;
@@ -41,8 +41,8 @@ describe('Settings (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'set-admin', UserRole.ADMIN)).accessToken;
-    managerToken = (await signInAs(context, 'set-manager', UserRole.MANAGER)).accessToken;
-    staffToken = (await signInAs(context, 'set-staff', UserRole.STAFF)).accessToken;
+    managerToken = (await inviteTeammate(context, adminToken, 'set-manager', UserRole.MANAGER)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'set-staff', UserRole.STAFF)).accessToken;
   });
 
   afterAll(async () => {

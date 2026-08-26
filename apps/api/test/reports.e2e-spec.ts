@@ -1,7 +1,7 @@
 import request from 'supertest';
 import type { ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { PaymentMethod, StockMovementType, UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface Identified {
   id: string;
@@ -90,7 +90,7 @@ describe('Reports (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'rpt-admin', UserRole.ADMIN)).accessToken;
-    staffToken = (await signInAs(context, 'rpt-staff', UserRole.STAFF)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'rpt-staff', UserRole.STAFF)).accessToken;
 
     const category = await as(adminToken, 'post', '/api/v1/categories')
       .send({ name: `${label} Reports` })

@@ -45,7 +45,7 @@ function sign(payload: Record<string, unknown>, secret = ACCESS_SECRET, expiresI
   return new JwtService({}).sign(payload, { secret, expiresIn });
 }
 
-const validPayload = { sub: 'user-1', email: 'staff@stockpro.test', role: UserRole.STAFF };
+const validPayload = { sub: 'user-1', email: 'staff@stockpro.test', role: UserRole.STAFF, organizationId: 'org-1' };
 
 describe('JwtAuthGuard', () => {
   afterEach(() => {
@@ -63,7 +63,7 @@ describe('JwtAuthGuard', () => {
     const { guard, context, request } = harness(`Bearer ${sign(validPayload)}`);
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    expect(request.user).toEqual({ id: 'user-1', email: 'staff@stockpro.test', role: UserRole.STAFF });
+    expect(request.user).toEqual({ id: 'user-1', email: 'staff@stockpro.test', role: UserRole.STAFF, organizationId: 'org-1' });
   });
 
   it('refuses a request with no Authorization header', async () => {

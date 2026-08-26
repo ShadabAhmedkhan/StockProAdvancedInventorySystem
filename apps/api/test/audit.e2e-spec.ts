@@ -12,7 +12,7 @@ import {
   UserRole,
   UserStatus,
 } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, refreshCookie, registerUser, signInAs, TEST_PASSWORD, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTeammate, createTestApp, inviteTeammate, refreshCookie, signInAs, TEST_PASSWORD, type TestApp } from './support/auth.helper';
 
 interface Identified {
   id: string;
@@ -101,9 +101,9 @@ describe('Audit (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'aud-admin', UserRole.ADMIN)).accessToken;
-    managerToken = (await signInAs(context, 'aud-manager', UserRole.MANAGER)).accessToken;
-    staffToken = (await signInAs(context, 'aud-staff', UserRole.STAFF)).accessToken;
-    const technician = await signInAs(context, 'aud-tech', UserRole.TECHNICIAN);
+    managerToken = (await inviteTeammate(context, adminToken, 'aud-manager', UserRole.MANAGER)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'aud-staff', UserRole.STAFF)).accessToken;
+    const technician = await inviteTeammate(context, adminToken, 'aud-tech', UserRole.TECHNICIAN);
     technicianToken = technician.accessToken;
     technicianId = technician.id;
 
@@ -132,7 +132,7 @@ describe('Audit (e2e)', () => {
     // separate from this suite's raised global limit, so LOGIN and LOGOUT
     // share the one real login call rather than each spending their own.
     it('records LOGIN on success and LOGOUT for the session owner', async () => {
-      const user = await registerUser(context, 'aud-login');
+      const user = await createTeammate(context, adminToken, 'aud-login', UserRole.STAFF);
 
       const login = await request(context.server).post('/api/v1/auth/login').send({ email: user.email, password: TEST_PASSWORD }).expect(200);
       const userId = body<{ user: { id: string } }>(login).user.id;
@@ -152,7 +152,7 @@ describe('Audit (e2e)', () => {
     });
 
     it('records LOGIN_FAILED with no actor for a wrong password', async () => {
-      const user = await registerUser(context, 'aud-wrongpw');
+      const user = await createTeammate(context, adminToken, 'aud-wrongpw', UserRole.STAFF);
 
       await request(context.server).post('/api/v1/auth/login').send({ email: user.email, password: 'TotallyWrong1' }).expect(401);
 
@@ -182,7 +182,7 @@ describe('Audit (e2e)', () => {
     });
 
     it('records ROLE_CHANGED with the old and new role', async () => {
-      const staff = await registerUser(context, 'aud-promote');
+      const staff = await createTeammate(context, adminToken, 'aud-promote', UserRole.STAFF);
 
       await as(adminToken, 'patch', `/api/v1/users/${staff.id}/role`).send({ role: UserRole.MANAGER }).expect(200);
 
@@ -191,7 +191,7 @@ describe('Audit (e2e)', () => {
     });
 
     it('records STATUS_CHANGED', async () => {
-      const staff = await registerUser(context, 'aud-suspend');
+      const staff = await createTeammate(context, adminToken, 'aud-suspend', UserRole.STAFF);
 
       await as(adminToken, 'patch', `/api/v1/users/${staff.id}/status`).send({ status: UserStatus.SUSPENDED }).expect(200);
 

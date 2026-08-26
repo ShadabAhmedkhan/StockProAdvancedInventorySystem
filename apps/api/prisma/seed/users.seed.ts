@@ -34,7 +34,7 @@ export interface SeededUsers {
   technician: { id: string };
 }
 
-export async function seedUsers(): Promise<SeededUsers> {
+export async function seedUsers(organizationId: string): Promise<SeededUsers> {
   const passwordHash = await hashPassword(SEED_PASSWORD);
 
   const created = await Promise.all(
@@ -42,7 +42,7 @@ export async function seedUsers(): Promise<SeededUsers> {
       prisma.user.upsert({
         where: { email: user.email },
         update: { firstName: user.firstName, lastName: user.lastName, role: user.role, status: UserStatus.ACTIVE },
-        create: { ...user, passwordHash, status: UserStatus.ACTIVE },
+        create: { ...user, organizationId, passwordHash, status: UserStatus.ACTIVE },
         select: { id: true, role: true, email: true },
       }),
     ),

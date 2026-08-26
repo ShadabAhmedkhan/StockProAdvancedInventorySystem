@@ -1,4 +1,6 @@
 import { ConflictException } from '@nestjs/common';
+import type { TenantTransactionClient } from '../../prisma/tenant-prisma.provider';
+import { getCurrentOrgId } from '../tenant/tenant-context';
 import { ErrorCode } from '../enums/error-code.enum';
 import type { Prisma } from '../../generated/prisma/client';
 import type { StockMovementType, StockReferenceType } from '../../generated/prisma/enums';
@@ -48,12 +50,13 @@ export interface ConsumptionContext {
  * elsewhere cannot be promised again, so two documents committed at the same
  * moment cannot both claim the last one.
  */
-export async function reserveStock(tx: Prisma.TransactionClient, lines: readonly StockLine[]): Promise<void> {
+export async function reserveStock(tx: Prisma.TransactionClient | TenantTransactionClient, lines: readonly StockLine[]): Promise<void> {
   for (const line of inProductOrder(lines)) {
     const affected = await tx.$executeRaw`
       UPDATE "Inventory"
       SET "reservedQuantity" = "reservedQuantity" + ${line.quantity}, "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
+        AND "organizationId" = ${getCurrentOrgId()}::uuid
         AND "quantity" - "reservedQuantity" >= ${line.quantity}
     `;
 
@@ -72,7 +75,11 @@ export async function reserveStock(tx: Prisma.TransactionClient, lines: readonly
  * ledger records the levels this document actually saw rather than whatever a
  * separate read might find a moment later.
  */
-export async function consumeStock(tx: Prisma.TransactionClient, lines: readonly StockLine[], context: ConsumptionContext): Promise<void> {
+export async function consumeStock(
+  tx: Prisma.TransactionClient | TenantTransactionClient,
+  lines: readonly StockLine[],
+  context: ConsumptionContext,
+): Promise<void> {
   const movements: Prisma.StockMovementCreateManyInput[] = [];
 
   for (const line of inProductOrder(lines)) {
@@ -82,6 +89,7 @@ export async function consumeStock(tx: Prisma.TransactionClient, lines: readonly
           "reservedQuantity" = "reservedQuantity" - ${line.quantity},
           "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
+        AND "organizationId" = ${getCurrentOrgId()}::uuid
         AND "quantity" >= ${line.quantity}
         AND "reservedQuantity" >= ${line.quantity}
       RETURNING "quantity"
@@ -94,6 +102,7 @@ export async function consumeStock(tx: Prisma.TransactionClient, lines: readonly
     }
 
     movements.push({
+      organizationId: getCurrentOrgId(),
       productId: line.productId,
       type: context.type,
       quantity: line.quantity,
@@ -117,7 +126,11 @@ export async function consumeStock(tx: Prisma.TransactionClient, lines: readonly
  * read and written, so a simultaneous sale of the same product cannot lose
  * either change.
  */
-export async function restoreStock(tx: Prisma.TransactionClient, lines: readonly StockLine[], context: ConsumptionContext): Promise<void> {
+export async function restoreStock(
+  tx: Prisma.TransactionClient | TenantTransactionClient,
+  lines: readonly StockLine[],
+  context: ConsumptionContext,
+): Promise<void> {
   const movements: Prisma.StockMovementCreateManyInput[] = [];
 
   for (const line of inProductOrder(lines)) {
@@ -125,6 +138,7 @@ export async function restoreStock(tx: Prisma.TransactionClient, lines: readonly
       UPDATE "Inventory"
       SET "quantity" = "quantity" + ${line.quantity}, "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
+        AND "organizationId" = ${getCurrentOrgId()}::uuid
       RETURNING "quantity"
     `;
 
@@ -140,6 +154,7 @@ export async function restoreStock(tx: Prisma.TransactionClient, lines: readonly
     }
 
     movements.push({
+      organizationId: getCurrentOrgId(),
       productId: line.productId,
       type: context.type,
       quantity: line.quantity,
@@ -155,12 +170,13 @@ export async function restoreStock(tx: Prisma.TransactionClient, lines: readonly
 }
 
 /** Gives up a claim, leaving the quantity on hand untouched. */
-export async function releaseStock(tx: Prisma.TransactionClient, lines: readonly StockLine[]): Promise<void> {
+export async function releaseStock(tx: Prisma.TransactionClient | TenantTransactionClient, lines: readonly StockLine[]): Promise<void> {
   for (const line of inProductOrder(lines)) {
     const affected = await tx.$executeRaw`
       UPDATE "Inventory"
       SET "reservedQuantity" = "reservedQuantity" - ${line.quantity}, "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
+        AND "organizationId" = ${getCurrentOrgId()}::uuid
         AND "reservedQuantity" >= ${line.quantity}
     `;
 
@@ -196,9 +212,9 @@ function inProductOrder(lines: readonly StockLine[]): StockLine[] {
 }
 
 /** Reached only on the failure path, so the extra read costs nothing normally. */
-async function insufficientStock(tx: Prisma.TransactionClient, line: StockLine): Promise<ConflictException> {
+async function insufficientStock(tx: Prisma.TransactionClient | TenantTransactionClient, line: StockLine): Promise<ConflictException> {
   const inventory = await tx.inventory.findUnique({
-    where: { productId: line.productId },
+    where: { productId: line.productId, organizationId: getCurrentOrgId() },
     select: { quantity: true, reservedQuantity: true },
   });
 

@@ -1,16 +1,17 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { searchAcross } from '../common/pagination/search.util';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import type { Customer, Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { CreateCustomerDto } from './dto/create-customer.dto';
 import type { CustomerQueryDto } from './dto/customer-query.dto';
 import type { UpdateCustomerDto } from './dto/update-customer.dto';
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient) {}
 
   async findAll(query: CustomerQueryDto): Promise<Paginated<Customer>> {
     const where = buildWhere(query);
@@ -45,6 +46,7 @@ export class CustomersService {
 
     return this.prisma.customer.create({
       data: {
+        organizationId: getCurrentOrgId(),
         customerCode: dto.customerCode,
         firstName: dto.firstName,
         lastName: dto.lastName,
@@ -103,7 +105,10 @@ export class CustomersService {
    * Saying so is better than letting the caller retry against an invisible row.
    */
   private async assertCodeAvailable(customerCode: string, exceptId?: string): Promise<void> {
-    const existing = await this.prisma.customer.findUnique({ where: { customerCode }, select: { id: true, deletedAt: true } });
+    const existing = await this.prisma.customer.findUnique({
+      where: { organizationId_customerCode: { organizationId: getCurrentOrgId(), customerCode } },
+      select: { id: true, deletedAt: true },
+    });
 
     if (existing === null || existing.id === exceptId) {
       return;

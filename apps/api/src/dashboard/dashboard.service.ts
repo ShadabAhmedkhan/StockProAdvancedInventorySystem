@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { FinanceService } from '../finance/finance.service';
 import { Prisma } from '../generated/prisma/client';
 import { OrderStatus, RepairStatus, ReturnStatus, TransactionType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import { OPEN_REPAIR_STATUSES, PAYABLE_REPAIR_STATUSES } from '../repairs/repair-status';
 import type { MovementWithContext } from '../stock/stock.service';
 import { StockService, type StockSummary } from '../stock/stock.service';
@@ -57,7 +57,7 @@ export interface DashboardSummary {
 @Injectable()
 export class DashboardService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly financeService: FinanceService,
     private readonly stockService: StockService,
   ) {}

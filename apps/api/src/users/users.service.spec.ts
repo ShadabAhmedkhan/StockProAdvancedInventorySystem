@@ -3,8 +3,10 @@ import { Test } from '@nestjs/testing';
 import { RefreshTokenService } from '../auth/refresh-token.service';
 import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
 import type { UserQueryDto } from './dto/user-query.dto';
 import { UsersService } from './users.service';
 
@@ -41,6 +43,7 @@ describe('UsersService', () => {
   let record: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     findUnique = jest.fn();
     findMany = jest.fn(() => Promise.resolve([user()]));
     create = jest.fn(() => Promise.resolve(user()));
@@ -51,10 +54,13 @@ describe('UsersService', () => {
     revokeAllForUser = jest.fn(() => Promise.resolve(2));
     record = jest.fn(() => Promise.resolve());
 
+    const client = { user: { findUnique, findMany, create, update, count }, $transaction: transaction };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         UsersService,
-        { provide: PrismaService, useValue: { user: { findUnique, findMany, create, update, count }, $transaction: transaction } },
+        { provide: PrismaService, useValue: client },
+        { provide: TENANT_PRISMA, useValue: client },
         { provide: RefreshTokenService, useValue: { revokeAllForUser } },
         { provide: AuditService, useValue: { record } },
       ],

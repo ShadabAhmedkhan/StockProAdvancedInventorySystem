@@ -1,11 +1,12 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { searchAcross } from '../common/pagination/search.util';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import type { Prisma } from '../generated/prisma/client';
 import { AuditAction, AuditEntity } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { CreateProductDto } from './dto/create-product.dto';
 import type { ProductQueryDto } from './dto/product-query.dto';
 import type { UpdateProductDto } from './dto/update-product.dto';
@@ -29,7 +30,7 @@ export type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof PR
 @Injectable()
 export class ProductsService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -57,7 +58,10 @@ export class ProductsService {
 
   /** Barcode lookup, for scanning at the counter. */
   async findByBarcode(barcode: string): Promise<ProductWithRelations> {
-    const product = await this.prisma.product.findUnique({ where: { barcode }, include: PRODUCT_INCLUDE });
+    const product = await this.prisma.product.findUnique({
+      where: { organizationId_barcode: { organizationId: getCurrentOrgId(), barcode } },
+      include: PRODUCT_INCLUDE,
+    });
 
     if (product?.deletedAt !== null) {
       throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'No product has this barcode' });
@@ -84,6 +88,7 @@ export class ProductsService {
     const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
+          organizationId: getCurrentOrgId(),
           sku: dto.sku,
           barcode: dto.barcode ?? null,
           name: dto.name,
@@ -98,7 +103,7 @@ export class ProductsService {
         select: { id: true },
       });
 
-      await tx.inventory.create({ data: { productId: product.id, quantity: 0 } });
+      await tx.inventory.create({ data: { organizationId: getCurrentOrgId(), productId: product.id, quantity: 0 } });
 
       await this.auditService.record(
         { userId: callerId, action: AuditAction.CREATE, entity: AuditEntity.PRODUCT, entityId: product.id, metadata: { sku: dto.sku, name: dto.name } },
@@ -191,7 +196,10 @@ export class ProductsService {
   }
 
   private async assertSkuAvailable(sku: string, exceptId?: string): Promise<void> {
-    const existing = await this.prisma.product.findUnique({ where: { sku }, select: { id: true, deletedAt: true } });
+    const existing = await this.prisma.product.findUnique({
+      where: { organizationId_sku: { organizationId: getCurrentOrgId(), sku } },
+      select: { id: true, deletedAt: true },
+    });
 
     if (existing === null || existing.id === exceptId) {
       return;
@@ -208,7 +216,10 @@ export class ProductsService {
       return;
     }
 
-    const existing = await this.prisma.product.findUnique({ where: { barcode }, select: { id: true, deletedAt: true } });
+    const existing = await this.prisma.product.findUnique({
+      where: { organizationId_barcode: { organizationId: getCurrentOrgId(), barcode } },
+      select: { id: true, deletedAt: true },
+    });
 
     if (existing === null || existing.id === exceptId) {
       return;

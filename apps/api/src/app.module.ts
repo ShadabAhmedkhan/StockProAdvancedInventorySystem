@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CustomersModule } from './customers/customers.module';
@@ -11,12 +12,17 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { FinanceModule } from './finance/finance.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { SubscriptionGuard } from './common/guards/subscription.guard';
+import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { appConfig } from './config/app.config';
 import { databaseConfig } from './config/database.config';
 import { validateEnv } from './config/env.validation';
 import { jwtConfig } from './config/jwt.config';
+import { platformAdminConfig } from './config/platform-admin.config';
+import { stripeConfig } from './config/stripe.config';
 import { HealthModule } from './health/health.module';
 import { OrdersModule } from './orders/orders.module';
+import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { RepairsModule } from './repairs/repairs.module';
@@ -36,7 +42,7 @@ import { UsersModule } from './users/users.module';
       // Resolved against the process working directory: the first entry covers
       // running from the app folder, the second the monorepo root .env.
       envFilePath: ['.env', '../../.env'],
-      load: [appConfig, databaseConfig, jwtConfig],
+      load: [appConfig, databaseConfig, jwtConfig, stripeConfig, platformAdminConfig],
       validate: validateEnv,
     }),
     ThrottlerModule.forRootAsync({
@@ -48,6 +54,8 @@ import { UsersModule } from './users/users.module';
     PrismaModule,
     AuditModule,
     AuthModule,
+    BillingModule,
+    PlatformAdminModule,
     UsersModule,
     CustomersModule,
     SuppliersModule,
@@ -71,6 +79,14 @@ import { UsersModule } from './users/users.module';
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Billing gate, last: a caller who is authenticated and permitted the
+    // route can still be refused if their organization's trial or
+    // subscription has lapsed.
+    { provide: APP_GUARD, useClass: SubscriptionGuard },
+    // Interceptors run after guards, wrapping the handler call itself - the tenant
+    // context has to be established here, not in JwtAuthGuard, so it survives into
+    // the controller/service call. See TenantContextInterceptor's own comment.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })
 export class AppModule {}

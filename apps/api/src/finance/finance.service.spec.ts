@@ -4,7 +4,8 @@ import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import { Prisma } from '../generated/prisma/client';
 import { ExpenseCategory, PaymentMethod, PaymentReferenceType, TransactionReferenceType, TransactionType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import type { CreateExpenseDto } from './dto/create-expense.dto';
 import type { ExpenseQueryDto } from './dto/expense-query.dto';
 import type { FinancialTransactionQueryDto } from './dto/financial-transaction-query.dto';
@@ -67,6 +68,7 @@ describe('FinanceService', () => {
   let queryRaw: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     expenseFindMany = jest.fn(() => Promise.resolve([expenseRow()]));
     expenseFindUnique = jest.fn(() => Promise.resolve(expenseRow()));
     expenseCreate = jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve(expenseRow(args.data)));
@@ -120,7 +122,7 @@ describe('FinanceService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         FinanceService,
-        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { ...client, $transaction: transaction } },
         { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
       ],
     }).compile();

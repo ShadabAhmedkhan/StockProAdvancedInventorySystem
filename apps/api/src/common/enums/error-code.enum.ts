@@ -18,6 +18,8 @@ export enum ErrorCode {
   TOO_MANY_REQUESTS = 'TOO_MANY_REQUESTS',
   INTERNAL_SERVER_ERROR = 'INTERNAL_SERVER_ERROR',
   SERVICE_UNAVAILABLE = 'SERVICE_UNAVAILABLE',
+  /** The organization's trial has lapsed or its subscription is not active. Distinct from `FORBIDDEN`: the caller may act, their org may not. */
+  SUBSCRIPTION_EXPIRED = 'SUBSCRIPTION_EXPIRED',
 }
 
 const STATUS_TO_CODE = new Map<number, ErrorCode>([

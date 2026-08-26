@@ -1,7 +1,9 @@
 import { seedCatalog } from './catalog.seed';
 import { prisma } from './client';
+import { seedOrganization } from './organization.seed';
 import { seedCustomers, seedSuppliers } from './parties.seed';
 import { seedOperations } from './operations.seed';
+import { seedPlatformAdmin } from './platform-admin.seed';
 import { SEED_PASSWORD, seedUsers } from './users.seed';
 
 /**
@@ -15,11 +17,13 @@ import { SEED_PASSWORD, seedUsers } from './users.seed';
 async function main(): Promise<void> {
   const started = Date.now();
 
-  const users = await seedUsers();
-  const customers = await seedCustomers();
-  const supplierCount = await seedSuppliers();
-  const catalog = await seedCatalog(users.admin.id);
-  const operations = await seedOperations(users, customers, catalog);
+  const organization = await seedOrganization();
+  const users = await seedUsers(organization.id);
+  const customers = await seedCustomers(organization.id);
+  const supplierCount = await seedSuppliers(organization.id);
+  const catalog = await seedCatalog(organization.id, users.admin.id);
+  const operations = await seedOperations(organization.id, users, customers, catalog);
+  const platformAdmin = await seedPlatformAdmin();
 
   const inventoryUnits = await prisma.inventory.aggregate({ _sum: { quantity: true } });
   const movementCount = await prisma.stockMovement.count();
@@ -46,6 +50,9 @@ async function main(): Promise<void> {
       '  Development sign-in (local only):',
       `    admin@stockpro.test / ${SEED_PASSWORD}`,
       '',
+      ...(platformAdmin === null
+        ? ['  Platform admin not seeded (set PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD to create one)', '']
+        : [`  Platform admin: ${platformAdmin.email}`, '']),
     ].join('\n'),
   );
 }

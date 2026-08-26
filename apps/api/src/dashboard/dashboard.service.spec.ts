@@ -3,7 +3,8 @@ import { firstCallArg } from '../common/testing/mock-args';
 import { FinanceService } from '../finance/finance.service';
 import { Prisma } from '../generated/prisma/client';
 import { OrderStatus, ReturnStatus, TransactionType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { StockService, type StockSummary } from '../stock/stock.service';
 import { DashboardService } from './dashboard.service';
 
@@ -35,6 +36,7 @@ describe('DashboardService', () => {
   let findMovements: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     orderCount = jest.fn(() => Promise.resolve(6));
     repairCount = jest.fn(() => Promise.resolve(2));
     repairGroupBy = jest.fn(() => Promise.resolve([]));
@@ -70,7 +72,7 @@ describe('DashboardService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         DashboardService,
-        { provide: PrismaService, useValue: prismaMock },
+        { provide: TENANT_PRISMA, useValue: prismaMock },
         { provide: FinanceService, useValue: { summary: financeSummary } },
         { provide: StockService, useValue: { summary: stockSummary, findMovements } },
       ],

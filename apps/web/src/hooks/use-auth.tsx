@@ -11,6 +11,7 @@ export interface RegisterInput {
   lastName: string;
   email: string;
   password: string;
+  organizationName: string;
 }
 
 interface AuthContextValue {

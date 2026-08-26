@@ -3,7 +3,8 @@ import { Test } from '@nestjs/testing';
 import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import type { ProductQueryDto } from './dto/product-query.dto';
 import { ProductsService } from './products.service';
 
@@ -62,10 +63,13 @@ describe('ProductsService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     // The service looks a product up three ways: by sku and barcode to check
-    // availability, and by id to read one back. Only the sku probe should
-    // find nothing by default, or every create would report a conflict.
-    productFindUnique = jest.fn((args: { where: Record<string, unknown> }) => Promise.resolve('sku' in args.where ? null : product()));
+    // availability, and by id to read one back. Only the sku/barcode probes
+    // should find nothing by default, or every create would report a conflict.
+    productFindUnique = jest.fn((args: { where: Record<string, unknown> }) =>
+      Promise.resolve('organizationId_sku' in args.where || 'organizationId_barcode' in args.where ? null : product()),
+    );
     productFindMany = jest.fn(() => Promise.resolve([product()]));
     productCreate = jest.fn(() => Promise.resolve({ id: 'product-1' }));
     productUpdate = jest.fn(() => Promise.resolve(product()));
@@ -89,7 +93,7 @@ describe('ProductsService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ProductsService,
-        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { ...client, $transaction: transaction } },
         { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
       ],
     }).compile();
@@ -178,7 +182,7 @@ describe('ProductsService', () => {
 
       expect(transaction).toHaveBeenCalledTimes(1);
       expect(productCreate).toHaveBeenCalledTimes(1);
-      expect(inventoryCreate).toHaveBeenCalledWith({ data: { productId: 'product-1', quantity: 0 } });
+      expect(inventoryCreate).toHaveBeenCalledWith({ data: { organizationId: 'org-1', productId: 'product-1', quantity: 0 } });
     });
 
     it('passes money through as an exact string, never a number', async () => {
@@ -286,6 +290,10 @@ describe('ProductsService', () => {
 
   describe('findByBarcode', () => {
     it('returns the product behind a barcode', async () => {
+      // Same where-shape as the availability check `create`/`update` use, which defaults to
+      // "not found" - this specific lookup needs the opposite, so override just this call.
+      productFindUnique.mockResolvedValueOnce(product());
+
       await expect(service.findByBarcode('8901000000011')).resolves.toMatchObject({ sku: 'SPH-AUR-A12' });
     });
 

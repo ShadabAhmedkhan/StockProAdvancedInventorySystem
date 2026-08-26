@@ -82,6 +82,45 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsIn(['true', 'false'])
   SWAGGER_ENABLED?: string;
+
+  /**
+   * Billing is optional infrastructure: an environment with none of these set
+   * boots and runs fine, it just cannot process checkouts. `BillingService`
+   * refuses at the point of use instead, rather than the whole API refusing
+   * to boot over a feature nothing may be exercising yet.
+   */
+  @IsOptional()
+  @MinLength(1)
+  STRIPE_SECRET_KEY?: string;
+
+  @IsOptional()
+  @MinLength(1)
+  STRIPE_WEBHOOK_SECRET?: string;
+
+  @IsOptional()
+  @MinLength(1)
+  STRIPE_PRICE_ID?: string;
+
+  /**
+   * Signs platform-admin access tokens - a separate identity from tenant
+   * users (see `platform-admin/` module), so it gets its own secret rather
+   * than reusing either JWT secret above.
+   */
+  @MinLength(MIN_SECRET_LENGTH, { message: `PLATFORM_ADMIN_JWT_SECRET must be at least ${String(MIN_SECRET_LENGTH)} characters` })
+  PLATFORM_ADMIN_JWT_SECRET: string;
+
+  /**
+   * Bootstraps the single platform-admin row on `pnpm db:seed`. Optional:
+   * an environment that never runs the seed (or runs it before deciding on
+   * credentials) still boots and works for every tenant-facing route.
+   */
+  @IsOptional()
+  @MinLength(1)
+  PLATFORM_ADMIN_EMAIL?: string;
+
+  @IsOptional()
+  @MinLength(8)
+  PLATFORM_ADMIN_PASSWORD?: string;
 }
 
 /**
@@ -107,6 +146,12 @@ export function validateEnv(config: Record<string, unknown>): EnvironmentVariabl
   // an access token, defeating the short access-token lifetime entirely.
   if (validated.JWT_ACCESS_SECRET === validated.JWT_REFRESH_SECRET) {
     throw new Error('Invalid environment configuration:\n  JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET');
+  }
+
+  // A platform-admin token must never verify against a tenant secret or vice
+  // versa - sharing a secret here would let either identity forge the other.
+  if (validated.PLATFORM_ADMIN_JWT_SECRET === validated.JWT_ACCESS_SECRET || validated.PLATFORM_ADMIN_JWT_SECRET === validated.JWT_REFRESH_SECRET) {
+    throw new Error('Invalid environment configuration:\n  PLATFORM_ADMIN_JWT_SECRET must differ from JWT_ACCESS_SECRET and JWT_REFRESH_SECRET');
   }
 
   return validated;

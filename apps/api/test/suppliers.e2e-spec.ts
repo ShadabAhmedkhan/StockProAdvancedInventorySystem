@@ -4,7 +4,7 @@ import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import type { Supplier } from '../src/generated/prisma/client';
 import { UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, registerUser, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 describe('Suppliers (e2e)', () => {
   let context: TestApp;
@@ -31,10 +31,10 @@ describe('Suppliers (e2e)', () => {
       await context.prisma.supplier.deleteMany({ where: { supplierCode: { startsWith: prefix } } });
     });
 
-    // Two sign-ins, within the five-per-minute login allowance.
+    // One founding sign-in; everyone else joins that same organization as a teammate.
     adminToken = (await signInAs(context, 'sup-admin', UserRole.ADMIN)).accessToken;
-    managerToken = (await signInAs(context, 'sup-manager', UserRole.MANAGER)).accessToken;
-    staffToken = (await registerUser(context, 'sup-staff')).accessToken;
+    managerToken = (await inviteTeammate(context, adminToken, 'sup-manager', UserRole.MANAGER)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'sup-staff', UserRole.STAFF)).accessToken;
   });
 
   afterAll(async () => {

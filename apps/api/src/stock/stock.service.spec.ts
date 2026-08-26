@@ -4,7 +4,8 @@ import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Prisma } from '../generated/prisma/client';
 import { StockMovementType, StockReferenceType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import type { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { StockService } from './stock.service';
 
@@ -27,6 +28,7 @@ describe('StockService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     productFindUnique = jest.fn(() => Promise.resolve({ id: PRODUCT_ID, sku: 'SPH-AUR-A12', deletedAt: null }));
     inventoryFindUnique = jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 }));
     inventoryFindUniqueOrThrow = jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 }));
@@ -50,7 +52,7 @@ describe('StockService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         StockService,
-        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { ...client, $transaction: transaction } },
         { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
       ],
     }).compile();

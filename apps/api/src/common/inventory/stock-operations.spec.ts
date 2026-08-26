@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
 import { StockMovementType, StockReferenceType } from '../../generated/prisma/enums';
 import { firstCallArg } from '../testing/mock-args';
+import * as tenantContext from '../tenant/tenant-context';
 import { consumeStock, releaseStock, reserveStock, type ConsumptionContext, type StockLine } from './stock-operations';
 
 const ORDER_ID = '00000000-0000-4000-8000-00000000000a';
@@ -44,6 +45,7 @@ describe('stock operations', () => {
   }
 
   beforeEach(() => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     executeRaw = jest.fn(() => Promise.resolve(1));
     queryRaw = jest.fn(() => Promise.resolve([{ quantity: 4 }]));
     inventoryFindUnique = jest.fn(() => Promise.resolve({ quantity: 1, reservedQuantity: 0 }));
@@ -63,7 +65,7 @@ describe('stock operations', () => {
 
       const [call] = rawCalls(executeRaw);
       expect(call?.sql).toContain('"reservedQuantity" = "reservedQuantity" + ');
-      expect(call?.values).toEqual([3, EARLIER.productId, 3]);
+      expect(call?.values).toEqual([3, EARLIER.productId, 'org-1', 3]);
     });
 
     it('guards on what is unreserved, not on what is on the shelf', async () => {
@@ -117,6 +119,7 @@ describe('stock operations', () => {
 
       const { data } = firstCallArg(createMany) as { data: Record<string, unknown>[] };
       expect(data[0]).toEqual({
+        organizationId: 'org-1',
         productId: EARLIER.productId,
         type: StockMovementType.SALE,
         quantity: 3,

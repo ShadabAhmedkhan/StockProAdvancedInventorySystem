@@ -4,7 +4,8 @@ import { AuditService } from '../audit/audit.service';
 import { firstCallArg, lastCallArg } from '../common/testing/mock-args';
 import { Prisma } from '../generated/prisma/client';
 import { OrderStatus, PaymentMethod, PaymentStatus } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import type { OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 
@@ -69,6 +70,7 @@ describe('OrdersService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     orderCreate = jest.fn(() => Promise.resolve({ id: ORDER_ID }));
     orderUpdate = jest.fn(() => Promise.resolve({ id: ORDER_ID }));
     orderFindUnique = jest.fn(() => Promise.resolve(orderRow()));
@@ -150,7 +152,7 @@ describe('OrdersService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrdersService,
-        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { ...client, $transaction: transaction } },
         { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
       ],
     }).compile();

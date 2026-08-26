@@ -3,7 +3,8 @@ import { Test } from '@nestjs/testing';
 import { AuditService } from '../audit/audit.service';
 import { firstCallArg } from '../common/testing/mock-args';
 import { AuditAction, SettingValueType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { SettingsService } from './settings.service';
 
 const USER_ID = '00000000-0000-4000-8000-0000000000ff';
@@ -30,6 +31,7 @@ describe('SettingsService', () => {
   let record: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     findMany = jest.fn(() => Promise.resolve([setting()]));
     findUnique = jest.fn(() => Promise.resolve(setting()));
     upsertMock = jest.fn(() => Promise.resolve(setting()));
@@ -39,7 +41,7 @@ describe('SettingsService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         SettingsService,
-        { provide: PrismaService, useValue: { setting: { findMany, findUnique, upsert: upsertMock, delete: deleteMock } } },
+        { provide: TENANT_PRISMA, useValue: { setting: { findMany, findUnique, upsert: upsertMock, delete: deleteMock } } },
         { provide: AuditService, useValue: { record } },
       ],
     }).compile();

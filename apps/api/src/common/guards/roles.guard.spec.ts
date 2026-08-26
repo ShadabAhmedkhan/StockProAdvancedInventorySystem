@@ -28,8 +28,8 @@ function guardRequiring(roles: UserRole[] | undefined): RolesGuard {
   return new RolesGuard(reflector);
 }
 
-const staff: AuthenticatedUser = { id: 'user-1', email: 'staff@stockpro.test', role: UserRole.STAFF };
-const admin: AuthenticatedUser = { id: 'user-2', email: 'admin@stockpro.test', role: UserRole.ADMIN };
+const staff: AuthenticatedUser = { id: 'user-1', email: 'staff@stockpro.test', role: UserRole.STAFF, organizationId: 'org-1' };
+const admin: AuthenticatedUser = { id: 'user-2', email: 'admin@stockpro.test', role: UserRole.ADMIN, organizationId: 'org-1' };
 
 describe('RolesGuard', () => {
   afterEach(() => {

@@ -1,4 +1,5 @@
 import type { Prisma } from '../../generated/prisma/client';
+import type { TenantTransactionClient } from '../../prisma/tenant-prisma.provider';
 
 /**
  * The kinds of document that carry a human-facing number, and the sequence
@@ -34,7 +35,7 @@ const NUMBER_WIDTH = 8;
  * @param tx The client of the surrounding transaction, so the call travels on
  * the same connection as the insert that will use the number.
  */
-export async function nextDocumentNumber(tx: Prisma.TransactionClient, kind: DocumentKind): Promise<string> {
+export async function nextDocumentNumber(tx: Prisma.TransactionClient | TenantTransactionClient, kind: DocumentKind): Promise<string> {
   const { prefix, sequence } = DOCUMENT_SEQUENCES[kind];
 
   // The sequence name is a bound parameter cast to `regclass`, not spliced

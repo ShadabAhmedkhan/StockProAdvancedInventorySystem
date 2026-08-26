@@ -1,3 +1,4 @@
+import type { AuthenticatedPlatformAdmin } from '../common/interfaces/authenticated-platform-admin.interface';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 
 declare global {
@@ -15,6 +16,13 @@ declare global {
        * on every route that is not marked `@Public()`.
        */
       user?: AuthenticatedUser;
+
+      /**
+       * The authenticated platform operator. Set only by
+       * `PlatformAdminAuthGuard`, on the small set of `/platform-admin/*`
+       * routes - never on a tenant route, and never alongside `user`.
+       */
+      platformAdmin?: AuthenticatedPlatformAdmin;
     }
   }
 }

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import type { AuthResult, PublicUser } from '../src/auth/dto/auth-response.dto';
+import type { PublicUser } from '../src/auth/dto/auth-response.dto';
 import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { UserRole, UserStatus } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, emailFor, registerUser, TEST_PASSWORD, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, emailFor, inviteTeammate, registerUser, TEST_PASSWORD, type TestApp } from './support/auth.helper';
 
 describe('Users and RBAC (e2e)', () => {
   let context: TestApp;
@@ -19,17 +19,15 @@ describe('Users and RBAC (e2e)', () => {
       await context.prisma.auditLog.deleteMany({ where: { userId: { in: context.createdUserIds } } });
     });
 
-    const staff = await registerUser(context, 'staff');
-    staffToken = staff.accessToken;
-
-    // Self-registration cannot mint an administrator, so the row is promoted
-    // directly and a fresh token picked up on the next sign-in.
+    // Self-registration founds a new organization and makes its registrant
+    // ADMIN, so the admin comes first; everyone else joins as a teammate of
+    // that same organization instead of founding their own.
     const admin = await registerUser(context, 'admin');
     adminId = admin.id;
-    await context.prisma.user.update({ where: { id: adminId }, data: { role: UserRole.ADMIN } });
+    adminToken = admin.accessToken;
 
-    const login = await request(context.server).post('/api/v1/auth/login').send({ email: admin.email, password: TEST_PASSWORD }).expect(200);
-    adminToken = (login.body as ApiResponse<AuthResult>).data.accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'staff', UserRole.STAFF)).accessToken;
+    await inviteTeammate(context, adminToken, 'technician', UserRole.TECHNICIAN);
   });
 
   afterAll(async () => {
@@ -169,7 +167,7 @@ describe('Users and RBAC (e2e)', () => {
     });
 
     it('ends every session when a user is suspended', async () => {
-      const victim = await registerUser(context, 'victim');
+      const victim = await inviteTeammate(context, adminToken, 'victim', UserRole.STAFF);
 
       await request(context.server).get('/api/v1/auth/me').set('Authorization', `Bearer ${victim.accessToken}`).expect(200);
 
@@ -187,7 +185,7 @@ describe('Users and RBAC (e2e)', () => {
     });
 
     it('promotes a user and the change is visible on their next call', async () => {
-      const promoted = await registerUser(context, 'promoted');
+      const promoted = await inviteTeammate(context, adminToken, 'promoted', UserRole.STAFF);
 
       await request(context.server)
         .patch(`/api/v1/users/${promoted.id}/role`)

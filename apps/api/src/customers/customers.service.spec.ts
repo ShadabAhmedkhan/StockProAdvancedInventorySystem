@@ -2,13 +2,15 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Customer, Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { CustomersService } from './customers.service';
 import type { CustomerQueryDto } from './dto/customer-query.dto';
 
 function customer(overrides: Partial<Customer> = {}): Customer {
   return {
     id: 'customer-1',
+    organizationId: 'org-1',
     customerCode: 'CUS-0001',
     firstName: 'Leila',
     lastName: 'Farouk',
@@ -37,6 +39,7 @@ describe('CustomersService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     findUnique = jest.fn();
     findMany = jest.fn(() => Promise.resolve([customer()]));
     create = jest.fn(() => Promise.resolve(customer()));
@@ -47,7 +50,7 @@ describe('CustomersService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         CustomersService,
-        { provide: PrismaService, useValue: { customer: { findUnique, findMany, create, update, count }, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { customer: { findUnique, findMany, create, update, count }, $transaction: transaction } },
       ],
     }).compile();
 

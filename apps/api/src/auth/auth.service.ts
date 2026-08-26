@@ -17,6 +17,7 @@ import { RefreshTokenService, type IssuedRefreshToken, type RefreshTokenContext 
 /** Every field of a user that may leave the API. `passwordHash` is not among them. */
 const PUBLIC_USER_SELECT = {
   id: true,
+  organizationId: true,
   firstName: true,
   lastName: true,
   email: true,
@@ -58,12 +59,15 @@ export class AuthService implements OnModuleInit {
   }
 
   /**
-   * Creates an account and signs it in.
+   * Creates a brand-new organization and its first account, and signs that
+   * account in as the organization's ADMIN.
    *
-   * The very first account on an empty database becomes the ADMIN, which is how
-   * a fresh deployment is bootstrapped. Every later self-registration is STAFF:
-   * a public endpoint must never be able to mint elevated privileges, so roles
-   * beyond the first are granted by an administrator through /users.
+   * This is self-serve signup, not an invite: every registration stands up a
+   * fresh, empty organization with the registrant as its sole (and therefore
+   * first) member. A teammate joins that same organization afterward through
+   * an administrator issuing an account via /users, not through this endpoint
+   * - a public endpoint must never be able to mint access into an existing
+   * organization it doesn't already belong to.
    */
   async register(dto: RegisterDto, context: RefreshTokenContext): Promise<AuthSession> {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email }, select: { id: true } });
@@ -71,18 +75,28 @@ export class AuthService implements OnModuleInit {
       throw new ConflictException({ code: ErrorCode.CONFLICT, message: 'An account with this email already exists' });
     }
 
-    const isFirstUser = (await this.prisma.user.count()) === 0;
+    const passwordHash = await hashPassword(dto.password);
+    const trialEndsAt = new Date();
+    trialEndsAt.setDate(trialEndsAt.getDate() + 14);
 
-    const user = await this.prisma.user.create({
-      data: {
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        email: dto.email,
-        passwordHash: await hashPassword(dto.password),
-        role: isFirstUser ? UserRole.ADMIN : UserRole.STAFF,
-        status: UserStatus.ACTIVE,
-      },
-      select: PUBLIC_USER_SELECT,
+    const user = await this.prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.create({
+        data: { name: dto.organizationName, subscriptionStatus: 'TRIALING', trialEndsAt },
+        select: { id: true },
+      });
+
+      return tx.user.create({
+        data: {
+          organizationId: organization.id,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          email: dto.email,
+          passwordHash,
+          role: UserRole.ADMIN,
+          status: UserStatus.ACTIVE,
+        },
+        select: PUBLIC_USER_SELECT,
+      });
     });
 
     return this.startSession(user, context);
@@ -105,6 +119,9 @@ export class AuthService implements OnModuleInit {
         metadata: { email: dto.email, reason: 'invalid_credentials' },
         ipAddress: context.ipAddress ?? null,
         userAgent: context.userAgent ?? null,
+        // No actor, but the account itself - and so its org - is still known
+        // whenever the email matched and only the password was wrong.
+        organizationId: user?.organizationId ?? null,
       });
       throw new UnauthorizedException({ code: ErrorCode.UNAUTHORIZED, message: 'Invalid email or password' });
     }
@@ -119,6 +136,7 @@ export class AuthService implements OnModuleInit {
         metadata: { email: dto.email, reason: 'account_not_active' },
         ipAddress: context.ipAddress ?? null,
         userAgent: context.userAgent ?? null,
+        organizationId: user.organizationId,
       });
       throw new ForbiddenException({ code: ErrorCode.FORBIDDEN, message: 'This account is not active. Contact an administrator.' });
     }
@@ -134,6 +152,7 @@ export class AuthService implements OnModuleInit {
       metadata: { email: user.email },
       ipAddress: context.ipAddress ?? null,
       userAgent: context.userAgent ?? null,
+      organizationId: user.organizationId,
     });
 
     return this.startSession(publicUser, context);
@@ -173,12 +192,18 @@ export class AuthService implements OnModuleInit {
     const userId = await this.refreshTokens.revoke(presentedToken);
 
     if (userId !== null) {
+      // No AsyncLocalStorage context exists on this public route; the org
+      // has to be looked up rather than assumed, so the entry stays visible
+      // to that org's own audit log instead of landing with a null one.
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { organizationId: true } });
+
       await this.auditService.record({
         userId,
         action: AuditAction.LOGOUT,
         entity: AuditEntity.AUTH,
         ipAddress: context.ipAddress ?? null,
         userAgent: context.userAgent ?? null,
+        organizationId: user?.organizationId ?? null,
       });
     }
   }
@@ -200,7 +225,7 @@ export class AuthService implements OnModuleInit {
   private async startSession(user: PublicUser, context: RefreshTokenContext): Promise<AuthSession> {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
-        { sub: user.id, email: user.email, role: user.role },
+        { sub: user.id, email: user.email, role: user.role, organizationId: user.organizationId },
         { secret: this.config.accessSecret, expiresIn: this.config.accessExpiresInSeconds },
       ),
       this.refreshTokens.issue(user.id, context),

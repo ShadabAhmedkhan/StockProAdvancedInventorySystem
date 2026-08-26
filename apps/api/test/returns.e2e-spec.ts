@@ -10,7 +10,7 @@ import {
   StockReferenceType,
   UserRole,
 } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface Identified {
   id: string;
@@ -145,7 +145,7 @@ describe('Returns (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'ret-admin', UserRole.ADMIN)).accessToken;
-    staffToken = (await signInAs(context, 'ret-staff', UserRole.STAFF)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'ret-staff', UserRole.STAFF)).accessToken;
 
     const category = await as(adminToken, 'post', '/api/v1/categories')
       .send({ name: `${label} Returnables` })
@@ -231,13 +231,14 @@ describe('Returns (e2e)', () => {
 
     it('leaves nothing behind when a line is bad', async () => {
       const order = await soldOrder([{ productId: await makeProduct('ROLLBACK', '10.00', 20), quantity: 1 }], '10.00');
-      const before = await context.prisma.return.count();
 
       await as(staffToken, 'post', '/api/v1/returns')
         .send({ orderId: order.id, reason: ReturnReason.OTHER, items: [{ orderItemId: order.items[0]?.id ?? '', quantity: 99 }] })
         .expect(422);
 
-      expect(await context.prisma.return.count()).toBe(before);
+      // Scoped to this order rather than a whole-table count: other e2e
+      // suites create returns concurrently against the same database.
+      expect(await context.prisma.return.count({ where: { orderId: order.id } })).toBe(0);
     });
 
     it('rejects a reason it has never heard of', async () => {

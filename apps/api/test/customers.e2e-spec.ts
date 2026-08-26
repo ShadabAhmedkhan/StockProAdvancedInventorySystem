@@ -4,7 +4,7 @@ import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import type { Customer } from '../src/generated/prisma/client';
 import { UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, registerUser, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 describe('Customers (e2e)', () => {
   let context: TestApp;
@@ -32,11 +32,11 @@ describe('Customers (e2e)', () => {
       await context.prisma.customer.deleteMany({ where: { customerCode: { startsWith: prefix } } });
     });
 
-    // Three sign-ins, within the five-per-minute login allowance.
+    // One founding sign-in; everyone else joins that same organization as a teammate.
     adminToken = (await signInAs(context, 'cust-admin', UserRole.ADMIN)).accessToken;
-    managerToken = (await signInAs(context, 'cust-manager', UserRole.MANAGER)).accessToken;
-    technicianToken = (await signInAs(context, 'cust-tech', UserRole.TECHNICIAN)).accessToken;
-    staffToken = (await registerUser(context, 'cust-staff')).accessToken;
+    managerToken = (await inviteTeammate(context, adminToken, 'cust-manager', UserRole.MANAGER)).accessToken;
+    technicianToken = (await inviteTeammate(context, adminToken, 'cust-tech', UserRole.TECHNICIAN)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'cust-staff', UserRole.STAFF)).accessToken;
   });
 
   afterAll(async () => {

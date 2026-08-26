@@ -11,6 +11,7 @@ export interface AuthenticatedUser {
   id: string;
   email: string;
   role: UserRole;
+  organizationId: string;
 }
 
 /** Claims carried by an access token. */
@@ -18,6 +19,7 @@ export interface AccessTokenPayload {
   sub: string;
   email: string;
   role: UserRole;
+  organizationId: string;
   iat: number;
   exp: number;
 }

@@ -19,7 +19,7 @@ describe('POST /auth/register (e2e)', () => {
   it('creates an account and returns a signed-in session', async () => {
     const response = await request(context.server)
       .post('/api/v1/auth/register')
-      .send({ firstName: 'Test', lastName: 'Fresh', email: emailFor(context, 'fresh'), password: TEST_PASSWORD })
+      .send({ firstName: 'Test', lastName: 'Fresh', email: emailFor(context, 'fresh'), password: TEST_PASSWORD, organizationName: `Org Fresh ${context.run}` })
       .expect(201);
 
     const body = response.body as ApiResponse<AuthResult>;
@@ -29,7 +29,8 @@ describe('POST /auth/register (e2e)', () => {
     expect(body.data.expiresIn).toBeGreaterThan(0);
     expect(body.data.accessToken.split('.')).toHaveLength(3);
     expect(body.data.user.email).toBe(emailFor(context, 'fresh'));
-    expect(body.data.user.role).toBe(UserRole.STAFF);
+    // Self-registration founds a new organization and makes its registrant ADMIN.
+    expect(body.data.user.role).toBe(UserRole.ADMIN);
     expect(refreshCookie(response)).toBeDefined();
 
     // The password hash must not reach the client by any route.
@@ -49,7 +50,14 @@ describe('POST /auth/register (e2e)', () => {
   it('refuses to let a self-registration choose its own role', async () => {
     const response = await request(context.server)
       .post('/api/v1/auth/register')
-      .send({ firstName: 'Mallory', lastName: 'Elevated', email: emailFor(context, 'elevated'), password: TEST_PASSWORD, role: UserRole.ADMIN })
+      .send({
+        firstName: 'Mallory',
+        lastName: 'Elevated',
+        email: emailFor(context, 'elevated'),
+        password: TEST_PASSWORD,
+        organizationName: `Org Elevated ${context.run}`,
+        role: UserRole.ADMIN,
+      })
       .expect(400);
 
     // forbidNonWhitelisted rejects the unknown property outright rather than
@@ -65,7 +73,7 @@ describe('POST /auth/register (e2e)', () => {
 
     const response = await request(context.server)
       .post('/api/v1/auth/register')
-      .send({ firstName: 'Test', lastName: 'Again', email: existing.email, password: TEST_PASSWORD })
+      .send({ firstName: 'Test', lastName: 'Again', email: existing.email, password: TEST_PASSWORD, organizationName: `Org Again ${context.run}` })
       .expect(409);
 
     expect((response.body as ApiErrorResponse).code).toBe(ErrorCode.CONFLICT);
@@ -78,7 +86,7 @@ describe('POST /auth/register (e2e)', () => {
   ])('rejects a password with %s', async (label: string, password: string) => {
     const response = await request(context.server)
       .post('/api/v1/auth/register')
-      .send({ firstName: 'Test', lastName: 'Weak', email: emailFor(context, `weak-${label.length}`), password })
+      .send({ firstName: 'Test', lastName: 'Weak', email: emailFor(context, `weak-${label.length}`), password, organizationName: `Org Weak ${context.run}` })
       .expect(400);
 
     const body = response.body as ApiErrorResponse;
@@ -90,6 +98,6 @@ describe('POST /auth/register (e2e)', () => {
     const response = await request(context.server).post('/api/v1/auth/register').send({ email: 'not-an-email', password: 'weak' }).expect(400);
 
     const fields = (response.body as ApiErrorResponse).errors?.map((error) => error.field) ?? [];
-    expect(fields).toEqual(expect.arrayContaining(['firstName', 'lastName', 'email', 'password']));
+    expect(fields).toEqual(expect.arrayContaining(['firstName', 'lastName', 'email', 'password', 'organizationName']));
   });
 });

@@ -1,11 +1,24 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { Prisma } from '../generated/prisma/client';
 import type { AuditAction, AuditEntity } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import type { TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import { AUDIT_INCLUDE, buildAuditWhere, type AuditLogWithActor } from './audit-views';
 import type { AuditQueryDto } from './dto/audit-query.dto';
+
+/** `AuditLog` isn't in the tenant Prisma extension's allow-list - it must accept writes
+ * from before a session exists (a failed login has no organization to attribute yet) - so
+ * this reads the current org id opportunistically instead of requiring one. */
+function currentOrgIdOrNull(): string | null {
+  try {
+    return getCurrentOrgId();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * What happened, told to `record()` by the module where it happened.
@@ -23,6 +36,15 @@ export interface AuditEntry {
   metadata?: Prisma.InputJsonValue | null;
   ipAddress?: string | null;
   userAgent?: string | null;
+  /**
+   * Overrides the ambient tenant context. Needed by the auth flows: `login`,
+   * `logout` and a failed login for a known account all happen on `@Public()`
+   * routes where no `AsyncLocalStorage` context is ever established, yet the
+   * caller already knows the org from the user row it just read - passing it
+   * here is what keeps these entries visible to that org's own audit log,
+   * rather than permanently orphaned with a null organization.
+   */
+  organizationId?: string | null;
 }
 
 /**
@@ -37,9 +59,10 @@ export interface AuditEntry {
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(entry: AuditEntry, client: Prisma.TransactionClient | PrismaService = this.prisma): Promise<void> {
+  async record(entry: AuditEntry, client: Prisma.TransactionClient | TenantTransactionClient | PrismaService = this.prisma): Promise<void> {
     await client.auditLog.create({
       data: {
+        organizationId: entry.organizationId !== undefined ? entry.organizationId : currentOrgIdOrNull(),
         userId: entry.userId,
         action: entry.action,
         entity: entry.entity,
@@ -52,7 +75,7 @@ export class AuditService {
   }
 
   async findAll(query: AuditQueryDto): Promise<Paginated<AuditLogWithActor>> {
-    const where = buildAuditWhere(query);
+    const where = { ...buildAuditWhere(query), organizationId: getCurrentOrgId() };
     const { skip, take } = pageWindow(query.page, query.limit);
 
     const [items, total] = await this.prisma.$transaction([
@@ -64,7 +87,7 @@ export class AuditService {
   }
 
   async findOne(id: string): Promise<AuditLogWithActor> {
-    const entry = await this.prisma.auditLog.findUnique({ where: { id }, include: AUDIT_INCLUDE });
+    const entry = await this.prisma.auditLog.findUnique({ where: { id, organizationId: getCurrentOrgId() }, include: AUDIT_INCLUDE });
 
     if (entry === null) {
       throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Audit entry not found' });

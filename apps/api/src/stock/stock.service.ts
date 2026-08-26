@@ -1,10 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma } from '../generated/prisma/client';
 import { AuditAction, AuditEntity, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { AdjustStockDto, ManualMovementType } from './dto/adjust-stock.dto';
 import { StockStatusFilter, type StockQueryDto, type StockSortField } from './dto/stock-query.dto';
 import type { StockMovementQueryDto } from './dto/stock-movement-query.dto';
@@ -90,7 +91,7 @@ export interface StockAdjustmentResult {
 @Injectable()
 export class StockService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -181,7 +182,7 @@ export class StockService {
         COUNT(*) FILTER (WHERE i."quantity" = 0)::int                                  AS "outOfStockCount"
       FROM "Inventory" i
       JOIN "Product" p ON p."id" = i."productId"
-      WHERE p."deletedAt" IS NULL
+      WHERE i."organizationId" = ${getCurrentOrgId()}::uuid AND p."deletedAt" IS NULL
     `;
 
     return (
@@ -251,6 +252,7 @@ export class StockService {
         UPDATE "Inventory"
         SET "quantity" = "quantity" + ${delta}, "updatedAt" = NOW()
         WHERE "productId" = ${dto.productId}::uuid
+          AND "organizationId" = ${getCurrentOrgId()}::uuid
           AND "quantity" + ${delta} >= "reservedQuantity"
       `;
 
@@ -265,6 +267,7 @@ export class StockService {
 
       const movement = await tx.stockMovement.create({
         data: {
+          organizationId: getCurrentOrgId(),
           productId: dto.productId,
           type: dto.type,
           quantity: dto.quantity,
@@ -306,7 +309,7 @@ export class StockService {
    * Turns "no rows matched" into an error the caller can act on. Reached only
    * on the failure path, so the extra read costs nothing in normal operation.
    */
-  private async explainRejectedAdjustment(tx: Prisma.TransactionClient, dto: AdjustStockDto): Promise<ConflictException | NotFoundException> {
+  private async explainRejectedAdjustment(tx: TenantTransactionClient, dto: AdjustStockDto): Promise<ConflictException | NotFoundException> {
     const inventory = await tx.inventory.findUnique({
       where: { productId: dto.productId },
       select: { quantity: true, reservedQuantity: true },
@@ -325,7 +328,7 @@ export class StockService {
   }
 
   private buildStockWhere(query: StockQueryDto & { productId?: string }): Prisma.Sql {
-    const conditions: Prisma.Sql[] = [Prisma.sql`p."deletedAt" IS NULL`];
+    const conditions: Prisma.Sql[] = [Prisma.sql`i."organizationId" = ${getCurrentOrgId()}::uuid`, Prisma.sql`p."deletedAt" IS NULL`];
 
     if (query.productId !== undefined) {
       conditions.push(Prisma.sql`p."id" = ${query.productId}::uuid`);

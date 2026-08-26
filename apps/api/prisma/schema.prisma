@@ -184,6 +184,7 @@ enum AuditEntity {
   EXPENSE
   PAYMENT
   SETTING
+  ORGANIZATION
 }
 
 enum SettingValueType {
@@ -193,21 +194,82 @@ enum SettingValueType {
   JSON
 }
 
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  SUSPENDED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy
+// ---------------------------------------------------------------------------
+
+/// A signed-up company. Every business record belongs to exactly one
+/// Organization, enforced by a required `organizationId` on each tenant
+/// table (AuditLog is the one exception - see its own comment).
+model Organization {
+  id                   String             @id @default(uuid(7)) @db.Uuid
+  name                 String             @db.VarChar(200)
+  stripeCustomerId     String?            @unique @db.VarChar(255)
+  stripeSubscriptionId String?            @unique @db.VarChar(255)
+  subscriptionStatus   SubscriptionStatus @default(TRIALING)
+  trialEndsAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  users                 User[]
+  customers             Customer[]
+  suppliers             Supplier[]
+  categories            Category[]
+  brands                Brand[]
+  products              Product[]
+  inventory             Inventory[]
+  orders                Order[]
+  repairs               Repair[]
+  returns               Return[]
+  expenses              Expense[]
+  payments              Payment[]
+  financialTransactions FinancialTransaction[]
+  auditLogs             AuditLog[]
+  settings              Setting[]
+  stockMovements        StockMovement[]
+
+  @@index([subscriptionStatus])
+}
+
+/// Operates the platform itself, not any one tenant. Deliberately not a
+/// `User` row: `User.organizationId` is a required FK, so a cross-tenant
+/// identity cannot be modeled as a tenant-scoped user without weakening that
+/// constraint for everyone. Authenticated separately from tenant users, with
+/// its own JWT secret and no tenant context - see `platform-admin/` module.
+model PlatformAdmin {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------
 
 model User {
-  id           String     @id @default(uuid(7)) @db.Uuid
-  firstName    String     @db.VarChar(100)
-  lastName     String     @db.VarChar(100)
-  email        String     @unique @db.VarChar(255)
-  passwordHash String     @db.VarChar(255)
-  role         UserRole   @default(STAFF)
-  status       UserStatus @default(ACTIVE)
-  lastLoginAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id             String     @id @default(uuid(7)) @db.Uuid
+  organizationId String     @db.Uuid
+  firstName      String     @db.VarChar(100)
+  lastName       String     @db.VarChar(100)
+  email          String     @unique @db.VarChar(255)
+  passwordHash   String     @db.VarChar(255)
+  role           UserRole   @default(STAFF)
+  status         UserStatus @default(ACTIVE)
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   refreshTokens        RefreshToken[]
   auditLogs            AuditLog[]
@@ -220,6 +282,7 @@ model User {
   paymentsRecorded     Payment[]
   transactionsRecorded FinancialTransaction[]
 
+  @@index([organizationId])
   @@index([role])
   @@index([status])
   @@index([createdAt])
@@ -248,22 +311,27 @@ model RefreshToken {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id           String    @id @default(uuid(7)) @db.Uuid
-  customerCode String    @unique @db.VarChar(32)
-  firstName    String    @db.VarChar(100)
-  lastName     String    @db.VarChar(100)
-  phone        String    @db.VarChar(32)
-  email        String?   @db.VarChar(255)
-  address      String?   @db.VarChar(500)
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  customerCode   String    @db.VarChar(32)
+  firstName      String    @db.VarChar(100)
+  lastName       String    @db.VarChar(100)
+  phone          String    @db.VarChar(32)
+  email          String?   @db.VarChar(255)
+  address        String?   @db.VarChar(500)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   orders  Order[]
   repairs Repair[]
   returns Return[]
 
+  @@unique([organizationId, customerCode])
+  @@index([organizationId])
   @@index([lastName, firstName])
   @@index([phone])
   @@index([email])
@@ -272,18 +340,23 @@ model Customer {
 }
 
 model Supplier {
-  id            String    @id @default(uuid(7)) @db.Uuid
-  supplierCode  String    @unique @db.VarChar(32)
-  name          String    @db.VarChar(200)
-  contactPerson String?   @db.VarChar(150)
-  phone         String    @db.VarChar(32)
-  email         String?   @db.VarChar(255)
-  address       String?   @db.VarChar(500)
-  notes         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  deletedAt     DateTime?
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  supplierCode   String    @db.VarChar(32)
+  name           String    @db.VarChar(200)
+  contactPerson  String?   @db.VarChar(150)
+  phone          String    @db.VarChar(32)
+  email          String?   @db.VarChar(255)
+  address        String?   @db.VarChar(500)
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, supplierCode])
+  @@index([organizationId])
   @@index([name])
   @@index([phone])
   @@index([deletedAt])
@@ -295,52 +368,64 @@ model Supplier {
 // ---------------------------------------------------------------------------
 
 model Category {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  name        String    @unique @db.VarChar(120)
-  slug        String    @unique @db.VarChar(140)
-  description String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  name           String    @db.VarChar(120)
+  slug           String    @db.VarChar(140)
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
-  products Product[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     Product[]
 
+  @@unique([organizationId, name])
+  @@unique([organizationId, slug])
+  @@index([organizationId])
   @@index([deletedAt])
 }
 
 model Brand {
-  id        String    @id @default(uuid(7)) @db.Uuid
-  name      String    @unique @db.VarChar(120)
-  slug      String    @unique @db.VarChar(140)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  name           String    @db.VarChar(120)
+  slug           String    @db.VarChar(140)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
-  products Product[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     Product[]
 
+  @@unique([organizationId, name])
+  @@unique([organizationId, slug])
+  @@index([organizationId])
   @@index([deletedAt])
 }
 
 model Product {
-  id           String    @id @default(uuid(7)) @db.Uuid
-  sku          String    @unique @db.VarChar(64)
-  barcode      String?   @unique @db.VarChar(64)
-  name         String    @db.VarChar(200)
-  description  String?
-  categoryId   String    @db.Uuid
-  brandId      String?   @db.Uuid
-  costPrice    Decimal   @db.Decimal(14, 2)
-  sellingPrice Decimal   @db.Decimal(14, 2)
-  minimumStock Int       @default(0)
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  deletedAt    DateTime?
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @db.Uuid
+  sku            String    @db.VarChar(64)
+  barcode        String?   @db.VarChar(64)
+  name           String    @db.VarChar(200)
+  description    String?
+  categoryId     String    @db.Uuid
+  brandId        String?   @db.Uuid
+  costPrice      Decimal   @db.Decimal(14, 2)
+  sellingPrice   Decimal   @db.Decimal(14, 2)
+  minimumStock   Int       @default(0)
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
 
   // Restrict: a category or brand that is still in use must be soft-deleted,
   // never dropped out from under its products.
-  category Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  brand    Brand?   @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  category     Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   inventory      Inventory?
   stockMovements StockMovement[]
@@ -348,6 +433,9 @@ model Product {
   returnItems    ReturnItem[]
   repairItems    RepairItem[]
 
+  @@unique([organizationId, sku])
+  @@unique([organizationId, barcode])
+  @@index([organizationId])
   @@index([categoryId])
   @@index([brandId])
   @@index([isActive])
@@ -365,14 +453,17 @@ model Product {
 /// also writes a StockMovement.
 model Inventory {
   id               String   @id @default(uuid(7)) @db.Uuid
+  organizationId   String   @db.Uuid
   productId        String   @unique @db.Uuid
   quantity         Int      @default(0)
   reservedQuantity Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([quantity])
 }
 
@@ -380,6 +471,7 @@ model Inventory {
 /// here, so the current level is always reconstructable from history.
 model StockMovement {
   id               String             @id @default(uuid(7)) @db.Uuid
+  organizationId   String             @db.Uuid
   productId        String             @db.Uuid
   type             StockMovementType
   quantity         Int
@@ -391,11 +483,13 @@ model StockMovement {
   createdById      String             @db.Uuid
   createdAt        DateTime           @default(now())
 
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Restrict keeps the ledger attributable: a user with movements cannot be
   // hard-deleted, only deactivated.
-  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
+  @@index([organizationId])
   @@index([productId, createdAt])
   @@index([type])
   @@index([referenceType, referenceId])
@@ -408,32 +502,36 @@ model StockMovement {
 // ---------------------------------------------------------------------------
 
 model Order {
-  id            String        @id @default(uuid(7)) @db.Uuid
-  orderNumber   String        @unique @db.VarChar(32)
-  customerId    String?       @db.Uuid
-  status        OrderStatus   @default(DRAFT)
-  subtotal      Decimal       @default(0) @db.Decimal(14, 2)
-  discount      Decimal       @default(0) @db.Decimal(14, 2)
-  tax           Decimal       @default(0) @db.Decimal(14, 2)
-  total         Decimal       @default(0) @db.Decimal(14, 2)
-  paidAmount    Decimal       @default(0) @db.Decimal(14, 2)
-  paymentStatus PaymentStatus @default(UNPAID)
-  notes         String?
-  createdById   String        @db.Uuid
+  id             String        @id @default(uuid(7)) @db.Uuid
+  organizationId String        @db.Uuid
+  orderNumber    String        @db.VarChar(32)
+  customerId     String?       @db.Uuid
+  status         OrderStatus   @default(DRAFT)
+  subtotal       Decimal       @default(0) @db.Decimal(14, 2)
+  discount       Decimal       @default(0) @db.Decimal(14, 2)
+  tax            Decimal       @default(0) @db.Decimal(14, 2)
+  total          Decimal       @default(0) @db.Decimal(14, 2)
+  paidAmount     Decimal       @default(0) @db.Decimal(14, 2)
+  paymentStatus  PaymentStatus @default(UNPAID)
+  notes          String?
+  createdById    String        @db.Uuid
   /// Set when the order reaches COMPLETED. Revenue reporting keys off this,
   /// not createdAt, so a draft raised last month cannot distort today's sales.
-  completedAt   DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  completedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   // A walk-in sale has no customer record.
-  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   items    OrderItem[]
   returns  Return[]
   payments Payment[]
 
+  @@unique([organizationId, orderNumber])
+  @@index([organizationId])
   @@index([customerId])
   @@index([status])
   @@index([paymentStatus])
@@ -469,7 +567,8 @@ model OrderItem {
 
 model Repair {
   id                   String       @id @default(uuid(7)) @db.Uuid
-  repairNumber         String       @unique @db.VarChar(32)
+  organizationId       String       @db.Uuid
+  repairNumber         String       @db.VarChar(32)
   customerId           String       @db.Uuid
   deviceType           DeviceType
   /// Manufacturer of the customer's device - unrelated to the sales catalogue.
@@ -490,13 +589,16 @@ model Repair {
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
 
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  technician User?    @relation("RepairTechnician", fields: [technicianId], references: [id], onDelete: Restrict)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  technician   User?        @relation("RepairTechnician", fields: [technicianId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   items         RepairItem[]
   statusHistory RepairStatusHistory[]
   payments      Payment[]
 
+  @@unique([organizationId, repairNumber])
+  @@index([organizationId])
   @@index([customerId])
   @@index([technicianId])
   @@index([status])
@@ -526,14 +628,14 @@ model RepairItem {
 }
 
 model RepairStatusHistory {
-  id          String       @id @default(uuid(7)) @db.Uuid
-  repairId    String       @db.Uuid
+  id          String        @id @default(uuid(7)) @db.Uuid
+  repairId    String        @db.Uuid
   /// Null on the first row, which records intake.
   fromStatus  RepairStatus?
   toStatus    RepairStatus
-  note        String?      @db.VarChar(500)
-  changedById String       @db.Uuid
-  createdAt   DateTime     @default(now())
+  note        String?       @db.VarChar(500)
+  changedById String        @db.Uuid
+  createdAt   DateTime      @default(now())
 
   repair    Repair @relation(fields: [repairId], references: [id], onDelete: Cascade)
   changedBy User   @relation(fields: [changedById], references: [id], onDelete: Restrict)
@@ -547,28 +649,32 @@ model RepairStatusHistory {
 // ---------------------------------------------------------------------------
 
 model Return {
-  id           String       @id @default(uuid(7)) @db.Uuid
-  returnNumber String       @unique @db.VarChar(32)
-  orderId      String       @db.Uuid
-  customerId   String?      @db.Uuid
-  reason       ReturnReason
-  reasonNote   String?
-  status       ReturnStatus @default(PENDING)
-  refundAmount Decimal      @default(0) @db.Decimal(14, 2)
-  createdById  String       @db.Uuid
+  id             String       @id @default(uuid(7)) @db.Uuid
+  organizationId String       @db.Uuid
+  returnNumber   String       @db.VarChar(32)
+  orderId        String       @db.Uuid
+  customerId     String?      @db.Uuid
+  reason         ReturnReason
+  reasonNote     String?
+  status         ReturnStatus @default(PENDING)
+  refundAmount   Decimal      @default(0) @db.Decimal(14, 2)
+  createdById    String       @db.Uuid
   /// Set when the return reaches COMPLETED, which is when stock is restored
   /// and the refund is recorded.
-  completedAt  DateTime?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  order     Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  customer  Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   items    ReturnItem[]
   payments Payment[]
 
+  @@unique([organizationId, returnNumber])
+  @@index([organizationId])
   @@index([orderId])
   @@index([customerId])
   @@index([status])
@@ -604,18 +710,22 @@ model ReturnItem {
 // ---------------------------------------------------------------------------
 
 model Expense {
-  id            String          @id @default(uuid(7)) @db.Uuid
-  expenseNumber String          @unique @db.VarChar(32)
-  category      ExpenseCategory
-  description   String          @db.VarChar(500)
-  amount        Decimal         @db.Decimal(14, 2)
-  expenseDate   DateTime        @db.Date
-  createdById   String          @db.Uuid
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id             String          @id @default(uuid(7)) @db.Uuid
+  organizationId String          @db.Uuid
+  expenseNumber  String          @db.VarChar(32)
+  category       ExpenseCategory
+  description    String          @db.VarChar(500)
+  amount         Decimal         @db.Decimal(14, 2)
+  expenseDate    DateTime        @db.Date
+  createdById    String          @db.Uuid
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
-  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@unique([organizationId, expenseNumber])
+  @@index([organizationId])
   @@index([category])
   @@index([expenseDate])
   @@index([createdById])
@@ -625,27 +735,31 @@ model Expense {
 /// Money actually moved. Exactly one of orderId / repairId / returnId is set,
 /// matching `referenceType`; the pairing is enforced by a check constraint.
 model Payment {
-  id            String               @id @default(uuid(7)) @db.Uuid
-  paymentNumber String               @unique @db.VarChar(32)
-  method        PaymentMethod
-  amount        Decimal              @db.Decimal(14, 2)
-  referenceType PaymentReferenceType
-  orderId       String?              @db.Uuid
-  repairId      String?              @db.Uuid
-  returnId      String?              @db.Uuid
+  id             String               @id @default(uuid(7)) @db.Uuid
+  organizationId String               @db.Uuid
+  paymentNumber  String               @db.VarChar(32)
+  method         PaymentMethod
+  amount         Decimal              @db.Decimal(14, 2)
+  referenceType  PaymentReferenceType
+  orderId        String?              @db.Uuid
+  repairId       String?              @db.Uuid
+  returnId       String?              @db.Uuid
   /// External reference such as a card authorisation or transfer id.
-  reference     String?              @db.VarChar(120)
-  note          String?              @db.VarChar(500)
-  paidAt        DateTime             @default(now())
-  createdById   String               @db.Uuid
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  reference      String?              @db.VarChar(120)
+  note           String?              @db.VarChar(500)
+  paidAt         DateTime             @default(now())
+  createdById    String               @db.Uuid
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
-  order        Order?  @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  repair       Repair? @relation(fields: [repairId], references: [id], onDelete: Restrict)
-  returnRecord Return? @relation(fields: [returnId], references: [id], onDelete: Restrict)
-  createdBy    User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  order        Order?       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  repair       Repair?      @relation(fields: [repairId], references: [id], onDelete: Restrict)
+  returnRecord Return?      @relation(fields: [returnId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@unique([organizationId, paymentNumber])
+  @@index([organizationId])
   @@index([orderId])
   @@index([repairId])
   @@index([returnId])
@@ -657,19 +771,22 @@ model Payment {
 /// Ledger of financial events used by the dashboard and reports. `amount` is
 /// always non-negative; `type` determines whether it is income or outflow.
 model FinancialTransaction {
-  id            String                    @id @default(uuid(7)) @db.Uuid
-  type          TransactionType
-  amount        Decimal                   @db.Decimal(14, 2)
-  description   String                    @db.VarChar(500)
-  occurredAt    DateTime                  @default(now())
-  referenceType TransactionReferenceType?
-  referenceId   String?                   @db.Uuid
-  createdById   String                    @db.Uuid
-  createdAt     DateTime                  @default(now())
-  updatedAt     DateTime                  @updatedAt
+  id             String                    @id @default(uuid(7)) @db.Uuid
+  organizationId String                    @db.Uuid
+  type           TransactionType
+  amount         Decimal                   @db.Decimal(14, 2)
+  description    String                    @db.VarChar(500)
+  occurredAt     DateTime                  @default(now())
+  referenceType  TransactionReferenceType?
+  referenceId    String?                   @db.Uuid
+  createdById    String                    @db.Uuid
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
 
-  createdBy User @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId])
   @@index([type])
   @@index([occurredAt])
   @@index([referenceType, referenceId])
@@ -683,19 +800,25 @@ model FinancialTransaction {
 /// Append-only trail of security- and money-relevant events.
 /// `metadata` never carries passwords, tokens or other secrets.
 model AuditLog {
-  id        String      @id @default(uuid(7)) @db.Uuid
+  id             String      @id @default(uuid(7)) @db.Uuid
+  /// Null for events with no organization context yet, e.g. a failed login
+  /// against an email that doesn't exist - stays nullable even after other
+  /// tenant tables are tightened to NOT NULL in the next migration.
+  organizationId String?     @db.Uuid
   /// Null for events with no authenticated actor, such as a failed login.
-  userId    String?     @db.Uuid
-  action    AuditAction
-  entity    AuditEntity
-  entityId  String?     @db.Uuid
-  metadata  Json?
-  ipAddress String?     @db.VarChar(64)
-  userAgent String?     @db.VarChar(255)
-  createdAt DateTime    @default(now())
+  userId         String?     @db.Uuid
+  action         AuditAction
+  entity         AuditEntity
+  entityId       String?     @db.Uuid
+  metadata       Json?
+  ipAddress      String?     @db.VarChar(64)
+  userAgent      String?     @db.VarChar(255)
+  createdAt      DateTime    @default(now())
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId, createdAt])
   @@index([userId, createdAt])
   @@index([entity, entityId])
   @@index([action])
@@ -703,11 +826,17 @@ model AuditLog {
 }
 
 model Setting {
-  id          String           @id @default(uuid(7)) @db.Uuid
-  key         String           @unique @db.VarChar(100)
-  value       String
-  valueType   SettingValueType @default(STRING)
-  description String?          @db.VarChar(500)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id             String           @id @default(uuid(7)) @db.Uuid
+  organizationId String           @db.Uuid
+  key            String           @db.VarChar(100)
+  value          String
+  valueType      SettingValueType @default(STRING)
+  description    String?          @db.VarChar(500)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
 }

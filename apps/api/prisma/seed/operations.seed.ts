@@ -242,10 +242,15 @@ export interface SeededOperations {
   expenseCount: number;
 }
 
-export async function seedOperations(users: SeededUsers, customers: SeededCustomers, catalog: SeededCatalog): Promise<SeededOperations> {
-  await seedOrders(users, customers, catalog);
-  await seedRepairs(users, customers);
-  await seedExpenses(users);
+export async function seedOperations(
+  organizationId: string,
+  users: SeededUsers,
+  customers: SeededCustomers,
+  catalog: SeededCatalog,
+): Promise<SeededOperations> {
+  await seedOrders(organizationId, users, customers, catalog);
+  await seedRepairs(organizationId, users, customers);
+  await seedExpenses(organizationId, users);
   await advanceDocumentSequences();
 
   return { orderCount: ORDERS.length, repairCount: REPAIRS.length, expenseCount: EXPENSES.length };
@@ -256,11 +261,14 @@ export async function seedOperations(users: SeededUsers, customers: SeededCustom
  * stock, records the SALE movements, the payment and the ledger entry - the
  * same set of writes the order-completion endpoint will perform.
  */
-async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalog: SeededCatalog): Promise<void> {
+async function seedOrders(organizationId: string, users: SeededUsers, customers: SeededCustomers, catalog: SeededCatalog): Promise<void> {
   const cashier = users.staff[0] ?? users.admin;
 
   for (const definition of ORDERS) {
-    const existing = await prisma.order.findUnique({ where: { orderNumber: definition.orderNumber }, select: { id: true } });
+    const existing = await prisma.order.findUnique({
+      where: { organizationId_orderNumber: { organizationId, orderNumber: definition.orderNumber } },
+      select: { id: true },
+    });
     if (existing !== null) {
       continue;
     }
@@ -287,6 +295,7 @@ async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalo
     await prisma.$transaction(async (tx) => {
       const order = await tx.order.create({
         data: {
+          organizationId,
           orderNumber: definition.orderNumber,
           customerId,
           status: definition.status,
@@ -323,6 +332,7 @@ async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalo
 
           await tx.stockMovement.create({
             data: {
+              organizationId,
               productId: line.product.id,
               type: StockMovementType.SALE,
               quantity: line.quantity,
@@ -341,6 +351,7 @@ async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalo
       if (paidAmount > 0) {
         await tx.payment.create({
           data: {
+            organizationId,
             paymentNumber: `PAY-${definition.orderNumber.slice(-8)}`,
             method: definition.paymentMethod,
             amount: money(paidAmount),
@@ -354,6 +365,7 @@ async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalo
 
         await tx.financialTransaction.create({
           data: {
+            organizationId,
             type: TransactionType.SALE,
             amount: money(paidAmount),
             description: `Sale ${definition.orderNumber}`,
@@ -369,9 +381,12 @@ async function seedOrders(users: SeededUsers, customers: SeededCustomers, catalo
   }
 }
 
-async function seedRepairs(users: SeededUsers, customers: SeededCustomers): Promise<void> {
+async function seedRepairs(organizationId: string, users: SeededUsers, customers: SeededCustomers): Promise<void> {
   for (const definition of REPAIRS) {
-    const existing = await prisma.repair.findUnique({ where: { repairNumber: definition.repairNumber }, select: { id: true } });
+    const existing = await prisma.repair.findUnique({
+      where: { organizationId_repairNumber: { organizationId, repairNumber: definition.repairNumber } },
+      select: { id: true },
+    });
     if (existing !== null) {
       continue;
     }
@@ -387,6 +402,7 @@ async function seedRepairs(users: SeededUsers, customers: SeededCustomers): Prom
     await prisma.$transaction(async (tx) => {
       const repair = await tx.repair.create({
         data: {
+          organizationId,
           repairNumber: definition.repairNumber,
           customerId: customer.id,
           deviceType: definition.deviceType,
@@ -425,9 +441,12 @@ async function seedRepairs(users: SeededUsers, customers: SeededCustomers): Prom
   }
 }
 
-async function seedExpenses(users: SeededUsers): Promise<void> {
+async function seedExpenses(organizationId: string, users: SeededUsers): Promise<void> {
   for (const definition of EXPENSES) {
-    const existing = await prisma.expense.findUnique({ where: { expenseNumber: definition.expenseNumber }, select: { id: true } });
+    const existing = await prisma.expense.findUnique({
+      where: { organizationId_expenseNumber: { organizationId, expenseNumber: definition.expenseNumber } },
+      select: { id: true },
+    });
     if (existing !== null) {
       continue;
     }
@@ -437,6 +456,7 @@ async function seedExpenses(users: SeededUsers): Promise<void> {
     await prisma.$transaction(async (tx) => {
       const expense = await tx.expense.create({
         data: {
+          organizationId,
           expenseNumber: definition.expenseNumber,
           category: definition.category,
           description: definition.description,
@@ -450,6 +470,7 @@ async function seedExpenses(users: SeededUsers): Promise<void> {
 
       await tx.financialTransaction.create({
         data: {
+          organizationId,
           type: TransactionType.EXPENSE,
           amount: definition.amount,
           description: definition.description,

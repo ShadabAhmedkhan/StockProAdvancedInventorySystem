@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { firstCallArg } from '../common/testing/mock-args';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { AuditAction, AuditEntity } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from './audit.service';
@@ -19,6 +20,7 @@ describe('AuditService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     create = jest.fn(() => Promise.resolve({}));
     findMany = jest.fn(() => Promise.resolve([{ id: 'entry-1' }]));
     findUnique = jest.fn(() => Promise.resolve({ id: 'entry-1' }));

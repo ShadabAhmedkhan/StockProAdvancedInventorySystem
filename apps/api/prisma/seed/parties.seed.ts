@@ -104,13 +104,13 @@ export interface SeededCustomers {
   byCode: Map<string, { id: string }>;
 }
 
-export async function seedCustomers(): Promise<SeededCustomers> {
+export async function seedCustomers(organizationId: string): Promise<SeededCustomers> {
   const created = await Promise.all(
     CUSTOMERS.map((customer) =>
       prisma.customer.upsert({
-        where: { customerCode: customer.customerCode },
+        where: { organizationId_customerCode: { organizationId, customerCode: customer.customerCode } },
         update: { ...customer },
-        create: { ...customer },
+        create: { ...customer, organizationId },
         select: { id: true, customerCode: true },
       }),
     ),
@@ -122,13 +122,13 @@ export async function seedCustomers(): Promise<SeededCustomers> {
   };
 }
 
-export async function seedSuppliers(): Promise<number> {
+export async function seedSuppliers(organizationId: string): Promise<number> {
   await Promise.all(
     SUPPLIERS.map((supplier) =>
       prisma.supplier.upsert({
-        where: { supplierCode: supplier.supplierCode },
+        where: { organizationId_supplierCode: { organizationId, supplierCode: supplier.supplierCode } },
         update: { ...supplier },
-        create: { ...supplier },
+        create: { ...supplier, organizationId },
         select: { id: true },
       }),
     ),

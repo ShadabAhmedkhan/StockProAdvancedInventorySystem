@@ -22,6 +22,7 @@ const config = {
 
 interface StoredUser {
   id: string;
+  organizationId: string;
   firstName: string;
   lastName: string;
   email: string;
@@ -36,6 +37,7 @@ interface StoredUser {
 async function storedUser(overrides: Partial<StoredUser> = {}): Promise<StoredUser> {
   return {
     id: 'user-1',
+    organizationId: 'org-1',
     firstName: 'Diego',
     lastName: 'Salas',
     email: 'diego@stockpro.test',
@@ -55,28 +57,34 @@ describe('AuthService', () => {
   let create: jest.Mock;
   let update: jest.Mock;
   let count: jest.Mock;
+  let organizationCreate: jest.Mock;
   let issue: jest.Mock;
   let consume: jest.Mock;
   let revoke: jest.Mock;
   let revokeAllForUser: jest.Mock;
   let record: jest.Mock;
+  let transaction: jest.Mock;
 
   beforeEach(async () => {
     findUnique = jest.fn();
     create = jest.fn();
     update = jest.fn(() => Promise.resolve({}));
     count = jest.fn(() => Promise.resolve(5));
+    organizationCreate = jest.fn(() => Promise.resolve({ id: 'org-1' }));
     issue = jest.fn(() => Promise.resolve({ token: 'refresh-token-value', expiresAt: new Date(Date.now() + 1000) }));
     consume = jest.fn();
     revoke = jest.fn();
     revokeAllForUser = jest.fn(() => Promise.resolve(0));
     record = jest.fn(() => Promise.resolve());
 
+    const client = { user: { findUnique, create, update, count }, organization: { create: organizationCreate } };
+    transaction = jest.fn((fn: (tx: typeof client) => Promise<unknown>) => fn(client));
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
         JwtService,
-        { provide: PrismaService, useValue: { user: { findUnique, create, update, count } } },
+        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
         { provide: RefreshTokenService, useValue: { issue, consume, revoke, revokeAllForUser } },
         { provide: AuditService, useValue: { record } },
         { provide: jwtConfig.KEY, useValue: config },
@@ -88,26 +96,17 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    const dto = { firstName: 'Ana', lastName: 'Ruiz', email: 'ana@stockpro.test', password: PASSWORD };
+    const dto = { firstName: 'Ana', lastName: 'Ruiz', email: 'ana@stockpro.test', password: PASSWORD, organizationName: 'Ana Repairs Co' };
 
-    it('makes the very first account an administrator', async () => {
+    it('creates a new organization and makes the registrant its administrator', async () => {
       findUnique.mockResolvedValue(null);
-      count.mockResolvedValue(0);
       create.mockImplementation(async () => storedUser({ email: dto.email, role: UserRole.ADMIN }));
 
       await service.register(dto, {});
 
-      expect((firstCallArg(create) as { data: { role: UserRole } }).data.role).toBe(UserRole.ADMIN);
-    });
-
-    it('creates every later self-registration as staff, never elevated', async () => {
-      findUnique.mockResolvedValue(null);
-      count.mockResolvedValue(3);
-      create.mockImplementation(async () => storedUser({ email: dto.email }));
-
-      await service.register(dto, {});
-
-      expect((firstCallArg(create) as { data: { role: UserRole } }).data.role).toBe(UserRole.STAFF);
+      expect((firstCallArg(organizationCreate) as { data: { name: string } }).data.name).toBe(dto.organizationName);
+      expect((firstCallArg(create) as { data: { role: UserRole; organizationId: string } }).data.role).toBe(UserRole.ADMIN);
+      expect((firstCallArg(create) as { data: { role: UserRole; organizationId: string } }).data.organizationId).toBe('org-1');
     });
 
     it('stores a hash, never the password', async () => {
@@ -276,7 +275,7 @@ describe('AuthService', () => {
     it('reads the record fresh rather than trusting the token claims', async () => {
       findUnique.mockResolvedValue(await storedUser({ role: UserRole.MANAGER }));
 
-      const user = await service.currentUser({ id: 'user-1', email: 'diego@stockpro.test', role: UserRole.STAFF });
+      const user = await service.currentUser({ id: 'user-1', email: 'diego@stockpro.test', role: UserRole.STAFF, organizationId: 'org-1' });
 
       expect(user.role).toBe(UserRole.MANAGER);
     });
@@ -284,7 +283,9 @@ describe('AuthService', () => {
     it('refuses a caller whose account was deactivated after the token was issued', async () => {
       findUnique.mockResolvedValue(await storedUser({ status: UserStatus.INACTIVE }));
 
-      await expect(service.currentUser({ id: 'user-1', email: 'diego@stockpro.test', role: UserRole.STAFF })).rejects.toThrow(UnauthorizedException);
+      await expect(service.currentUser({ id: 'user-1', email: 'diego@stockpro.test', role: UserRole.STAFF, organizationId: 'org-1' })).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 });

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { OrderStatus, PaymentMethod, PaymentStatus, StockMovementType, StockReferenceType, UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface Identified {
   id: string;
@@ -116,8 +116,8 @@ describe('Orders (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'orders-admin', UserRole.ADMIN)).accessToken;
-    staffToken = (await signInAs(context, 'orders-staff', UserRole.STAFF)).accessToken;
-    technicianToken = (await signInAs(context, 'orders-tech', UserRole.TECHNICIAN)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'orders-staff', UserRole.STAFF)).accessToken;
+    technicianToken = (await inviteTeammate(context, adminToken, 'orders-tech', UserRole.TECHNICIAN)).accessToken;
 
     const category = await request(context.server)
       .post('/api/v1/categories')

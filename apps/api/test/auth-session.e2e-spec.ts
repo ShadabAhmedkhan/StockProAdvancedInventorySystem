@@ -87,7 +87,8 @@ describe('Sessions (e2e)', () => {
       const body = response.body as ApiResponse<PublicUser>;
 
       expect(body.data.id).toBe(signedIn.id);
-      expect(body.data.role).toBe(UserRole.STAFF);
+      // Self-registration founds a new organization and makes its registrant ADMIN.
+      expect(body.data.role).toBe(UserRole.ADMIN);
       expect(body.data).not.toHaveProperty('passwordHash');
     });
 

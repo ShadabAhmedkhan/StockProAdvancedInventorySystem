@@ -13,7 +13,8 @@ import {
   StockMovementType,
   StockReferenceType,
 } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import type { ReturnQueryDto } from './dto/return-query.dto';
 import { ReturnsService } from './returns.service';
 
@@ -80,6 +81,7 @@ describe('ReturnsService', () => {
   let transitionRows: Record<string, unknown>[];
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     lockedOrder = { orderNumber: 'ORD-00000001', status: OrderStatus.COMPLETED, customerId: null, paidAmount: '100.00' };
     // Serves both the pending-lock (which reads `orderId`) and the status
     // transition (which reads the credit back).
@@ -167,7 +169,7 @@ describe('ReturnsService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         ReturnsService,
-        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { ...client, $transaction: transaction } },
         { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
       ],
     }).compile();

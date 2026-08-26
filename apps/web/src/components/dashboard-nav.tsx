@@ -26,6 +26,7 @@ const NAV_LINKS: NavLink[] = [
   { href: '/dashboard/users', label: 'Users', roles: ['ADMIN', 'MANAGER'] },
   { href: '/dashboard/audit', label: 'Audit', roles: ['ADMIN'] },
   { href: '/dashboard/settings', label: 'Settings', roles: ['ADMIN', 'MANAGER'] },
+  { href: '/dashboard/billing', label: 'Billing', roles: ['ADMIN'] },
 ];
 
 export function DashboardNav(): React.JSX.Element {

@@ -1,19 +1,22 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { PublicUser } from '../auth/dto/auth-response.dto';
 import { RefreshTokenService } from '../auth/refresh-token.service';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { hashPassword } from '../common/utils/password.util';
 import type { Prisma } from '../generated/prisma/client';
 import { AuditAction, AuditEntity, UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { CreateUserDto } from './dto/create-user.dto';
 import type { UpdateUserDto } from './dto/update-user.dto';
 import type { UserQueryDto } from './dto/user-query.dto';
 
 const PUBLIC_USER_SELECT = {
   id: true,
+  organizationId: true,
   firstName: true,
   lastName: true,
   email: true,
@@ -28,6 +31,7 @@ const PUBLIC_USER_SELECT = {
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly tenantPrisma: TenantPrismaClient,
     private readonly refreshTokens: RefreshTokenService,
     private readonly auditService: AuditService,
   ) {}
@@ -38,16 +42,16 @@ export class UsersService {
 
     // One round trip for both halves; counting separately would let the page
     // and the total disagree under concurrent writes.
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({ where, select: PUBLIC_USER_SELECT, orderBy: { [query.sortBy]: query.sortOrder }, skip, take }),
-      this.prisma.user.count({ where }),
+    const [items, total] = await this.tenantPrisma.$transaction([
+      this.tenantPrisma.user.findMany({ where, select: PUBLIC_USER_SELECT, orderBy: { [query.sortBy]: query.sortOrder }, skip, take }),
+      this.tenantPrisma.user.count({ where }),
     ]);
 
     return paginate(items, total, query.page, query.limit);
   }
 
   async findOne(id: string): Promise<PublicUser> {
-    const user = await this.prisma.user.findUnique({ where: { id }, select: PUBLIC_USER_SELECT });
+    const user = await this.tenantPrisma.user.findUnique({ where: { id }, select: PUBLIC_USER_SELECT });
 
     if (user === null) {
       throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'User not found' });
@@ -59,8 +63,9 @@ export class UsersService {
   async create(dto: CreateUserDto, callerId: string): Promise<PublicUser> {
     await this.assertEmailAvailable(dto.email);
 
-    const user = await this.prisma.user.create({
+    const user = await this.tenantPrisma.user.create({
       data: {
+        organizationId: getCurrentOrgId(),
         firstName: dto.firstName,
         lastName: dto.lastName,
         email: dto.email,
@@ -89,7 +94,7 @@ export class UsersService {
       await this.assertEmailAvailable(dto.email, id);
     }
 
-    return this.prisma.user.update({
+    return this.tenantPrisma.user.update({
       where: { id },
       data: {
         ...(dto.firstName === undefined ? {} : { firstName: dto.firstName }),
@@ -119,7 +124,7 @@ export class UsersService {
       await this.assertNotLastActiveAdmin(id);
     }
 
-    const updated = await this.prisma.user.update({ where: { id }, data: { role }, select: PUBLIC_USER_SELECT });
+    const updated = await this.tenantPrisma.user.update({ where: { id }, data: { role }, select: PUBLIC_USER_SELECT });
 
     await this.auditService.record({
       userId: callerId,
@@ -147,7 +152,7 @@ export class UsersService {
       await this.assertNotLastActiveAdmin(id);
     }
 
-    const updated = await this.prisma.user.update({ where: { id }, data: { status }, select: PUBLIC_USER_SELECT });
+    const updated = await this.tenantPrisma.user.update({ where: { id }, data: { status }, select: PUBLIC_USER_SELECT });
 
     if (status !== UserStatus.ACTIVE) {
       await this.refreshTokens.revokeAllForUser(id);
@@ -173,7 +178,7 @@ export class UsersService {
   }
 
   private async assertNotLastActiveAdmin(id: string): Promise<void> {
-    const others = await this.prisma.user.count({
+    const others = await this.tenantPrisma.user.count({
       where: { role: UserRole.ADMIN, status: UserStatus.ACTIVE, id: { not: id } },
     });
 

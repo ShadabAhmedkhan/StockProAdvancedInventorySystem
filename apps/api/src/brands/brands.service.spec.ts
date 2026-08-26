@@ -2,13 +2,15 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { Test } from '@nestjs/testing';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Brand, Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { BrandsService } from './brands.service';
 import type { BrandQueryDto } from './dto/brand-query.dto';
 
 function brand(overrides: Partial<Brand> = {}): Brand {
   return {
     id: 'brand-1',
+    organizationId: 'org-1',
     name: 'Aureon',
     slug: 'aureon',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -33,6 +35,7 @@ describe('BrandsService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     findUnique = jest.fn(() => Promise.resolve(null));
     findMany = jest.fn(() => Promise.resolve([brand()]));
     create = jest.fn(() => Promise.resolve(brand()));
@@ -45,7 +48,7 @@ describe('BrandsService', () => {
       providers: [
         BrandsService,
         {
-          provide: PrismaService,
+          provide: TENANT_PRISMA,
           useValue: { brand: { findUnique, findMany, create, update, count }, product: { count: productCount }, $transaction: transaction },
         },
       ],

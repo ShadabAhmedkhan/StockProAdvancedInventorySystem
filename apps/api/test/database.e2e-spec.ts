@@ -49,14 +49,26 @@ describe('Database schema (integration)', () => {
   });
 
   describe('seed data', () => {
+    // Scoped to the seed's own known accounts rather than a global count:
+    // every other e2e suite creates its own organizations and users against
+    // this same database, so a whole-table role count is only deterministic
+    // when this file runs alone, not as part of the full suite.
     it('created the documented user roles', async () => {
-      const counts = await prisma.user.groupBy({ by: ['role'], _count: { _all: true } });
-      const byRole = new Map(counts.map((row) => [row.role, row._count._all]));
+      const users = await prisma.user.findMany({
+        where: {
+          email: {
+            in: ['admin@stockpro.test', 'manager@stockpro.test', 'staff1@stockpro.test', 'staff2@stockpro.test', 'tech@stockpro.test'],
+          },
+        },
+        select: { email: true, role: true },
+      });
+      const roleByEmail = new Map(users.map((row) => [row.email, row.role]));
 
-      expect(byRole.get('ADMIN')).toBe(1);
-      expect(byRole.get('MANAGER')).toBe(1);
-      expect(byRole.get('STAFF')).toBe(2);
-      expect(byRole.get('TECHNICIAN')).toBe(1);
+      expect(roleByEmail.get('admin@stockpro.test')).toBe('ADMIN');
+      expect(roleByEmail.get('manager@stockpro.test')).toBe('MANAGER');
+      expect(roleByEmail.get('staff1@stockpro.test')).toBe('STAFF');
+      expect(roleByEmail.get('staff2@stockpro.test')).toBe('STAFF');
+      expect(roleByEmail.get('tech@stockpro.test')).toBe('TECHNICIAN');
     });
 
     it('never stores a plaintext password', async () => {
@@ -75,8 +87,14 @@ describe('Database schema (integration)', () => {
     });
 
     it('can explain every unit on hand from the movement ledger', async () => {
-      const inventories = await prisma.inventory.findMany({ select: { productId: true, quantity: true } });
-      const movements = await prisma.stockMovement.findMany({ select: { productId: true, type: true, quantity: true } });
+      // Scoped to the seed's own organization: every other e2e suite writes
+      // its own inventory and movements against this same database, and a
+      // suite that is mid-adjustment when this one happens to run concurrently
+      // would otherwise be caught with a movement written but its inventory
+      // update not yet committed (or vice versa).
+      const seedAdmin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@stockpro.test' }, select: { organizationId: true } });
+      const inventories = await prisma.inventory.findMany({ where: { organizationId: seedAdmin.organizationId }, select: { productId: true, quantity: true } });
+      const movements = await prisma.stockMovement.findMany({ where: { organizationId: seedAdmin.organizationId }, select: { productId: true, type: true, quantity: true } });
 
       const inbound = new Set<StockMovementType>([
         StockMovementType.PURCHASE,
@@ -157,11 +175,18 @@ describe('Database schema (integration)', () => {
     });
 
     it('rejects a duplicate SKU', async () => {
-      const existing = await prisma.product.findFirstOrThrow({ select: { sku: true, categoryId: true } });
+      const existing = await prisma.product.findFirstOrThrow({ select: { sku: true, categoryId: true, organizationId: true } });
 
       await expect(
         prisma.product.create({
-          data: { sku: existing.sku, name: 'Duplicate SKU probe', categoryId: existing.categoryId, costPrice: '1.00', sellingPrice: '2.00' },
+          data: {
+            sku: existing.sku,
+            name: 'Duplicate SKU probe',
+            categoryId: existing.categoryId,
+            organizationId: existing.organizationId,
+            costPrice: '1.00',
+            sellingPrice: '2.00',
+          },
         }),
       ).rejects.toThrow();
     });
@@ -169,7 +194,7 @@ describe('Database schema (integration)', () => {
 
   describe('money handling', () => {
     it('stores monetary values as exact decimals', async () => {
-      const product = await prisma.product.findUniqueOrThrow({ where: { sku: 'ACC-GLS-UNIV' }, select: { costPrice: true, sellingPrice: true } });
+      const product = await prisma.product.findFirstOrThrow({ where: { sku: 'ACC-GLS-UNIV' }, select: { costPrice: true, sellingPrice: true } });
 
       // 1.05 has no exact binary representation; Decimal must round-trip it.
       expect(product.costPrice.toFixed(2)).toBe('1.05');

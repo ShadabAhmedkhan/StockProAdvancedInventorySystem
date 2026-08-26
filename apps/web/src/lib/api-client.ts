@@ -46,6 +46,7 @@ export interface AuthResult {
   tokenType: 'Bearer';
   user: {
     id: string;
+    organizationId: string;
     firstName: string;
     lastName: string;
     email: string;
@@ -106,6 +107,24 @@ export function refreshSession(): Promise<AuthResult> {
   return refreshInFlight;
 }
 
+const BILLING_PAGE = '/dashboard/billing';
+
+/**
+ * A lapsed trial or subscription surfaces as this code from any gated route -
+ * checked in this one place rather than by every feature that might hit it,
+ * so a caller never has to know the billing page exists to redirect to it.
+ * The billing routes themselves are exempt from the check they report, so
+ * this can never fire from a request the billing page itself makes.
+ */
+function redirectToBillingIfExpired(error: unknown): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (error instanceof ApiError && error.body.code === 'SUBSCRIPTION_EXPIRED' && window.location.pathname !== BILLING_PAGE) {
+    window.location.assign(BILLING_PAGE);
+  }
+}
+
 export async function apiRequestEnvelope<T>(path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
   try {
     return await rawRequestEnvelope<T>(path, options);
@@ -116,6 +135,7 @@ export async function apiRequestEnvelope<T>(path: string, options: RequestOption
       setAccessToken(session.accessToken);
       return rawRequestEnvelope<T>(path, options);
     }
+    redirectToBillingIfExpired(error);
     throw error;
   }
 }

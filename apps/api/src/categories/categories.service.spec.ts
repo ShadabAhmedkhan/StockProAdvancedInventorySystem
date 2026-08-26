@@ -2,13 +2,15 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { Test } from '@nestjs/testing';
 import { firstCallArg } from '../common/testing/mock-args';
 import type { Category, Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { CategoriesService } from './categories.service';
 import type { CategoryQueryDto } from './dto/category-query.dto';
 
 function category(overrides: Partial<Category> = {}): Category {
   return {
     id: 'category-1',
+    organizationId: 'org-1',
     name: 'Smartphones',
     slug: 'smartphones',
     description: 'Handsets sold new and refurbished',
@@ -34,6 +36,7 @@ describe('CategoriesService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     findUnique = jest.fn(() => Promise.resolve(null));
     findMany = jest.fn(() => Promise.resolve([category()]));
     create = jest.fn(() => Promise.resolve(category()));
@@ -46,7 +49,7 @@ describe('CategoriesService', () => {
       providers: [
         CategoriesService,
         {
-          provide: PrismaService,
+          provide: TENANT_PRISMA,
           useValue: { category: { findUnique, findMany, create, update, count }, product: { count: productCount }, $transaction: transaction },
         },
       ],

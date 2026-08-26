@@ -12,6 +12,7 @@ import { errorMessage } from '@/lib/error-message';
 export default function RegisterPage(): React.JSX.Element | null {
   const { user, isLoading, register } = useAuth();
   const router = useRouter();
+  const [organizationName, setOrganizationName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -30,7 +31,7 @@ export default function RegisterPage(): React.JSX.Element | null {
     setError(null);
     setIsSubmitting(true);
     try {
-      await register({ firstName, lastName, email, password });
+      await register({ organizationName, firstName, lastName, email, password });
       router.replace('/dashboard');
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -51,7 +52,21 @@ export default function RegisterPage(): React.JSX.Element | null {
         }}
         className="w-full max-w-sm space-y-4"
       >
-        <h1 className="text-xl font-semibold">Create your account</h1>
+        <h1 className="text-xl font-semibold">Create your organization</h1>
+        <p className="text-sm text-muted-foreground">You&apos;ll be the administrator, with a 14-day free trial to get started.</p>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="organizationName">Organization name</Label>
+          <Input
+            id="organizationName"
+            required
+            maxLength={200}
+            value={organizationName}
+            onChange={(event) => {
+              setOrganizationName(event.target.value);
+            }}
+          />
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">

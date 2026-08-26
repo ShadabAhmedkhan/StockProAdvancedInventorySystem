@@ -12,7 +12,7 @@ import {
   TransactionType,
   UserRole,
 } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface Identified {
   id: string;
@@ -153,9 +153,9 @@ describe('Finance (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'fin-admin', UserRole.ADMIN)).accessToken;
-    managerToken = (await signInAs(context, 'fin-manager', UserRole.MANAGER)).accessToken;
-    staffToken = (await signInAs(context, 'fin-staff', UserRole.STAFF)).accessToken;
-    const technician = await signInAs(context, 'fin-tech', UserRole.TECHNICIAN);
+    managerToken = (await inviteTeammate(context, adminToken, 'fin-manager', UserRole.MANAGER)).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'fin-staff', UserRole.STAFF)).accessToken;
+    const technician = await inviteTeammate(context, adminToken, 'fin-tech', UserRole.TECHNICIAN);
     technicianToken = technician.accessToken;
     technicianId = technician.id;
 

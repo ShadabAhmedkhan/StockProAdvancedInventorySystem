@@ -4,7 +4,7 @@ import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import { StockMovementType, UserRole } from '../src/generated/prisma/enums';
 import type { StockAdjustmentResult, StockLevel, StockSummary } from '../src/stock/stock.service';
-import { closeTestApp, createTestApp, registerUser, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface MovementResponse {
   id: string;
@@ -59,7 +59,7 @@ describe('Stock (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'stock-admin', UserRole.ADMIN)).accessToken;
-    staffToken = (await registerUser(context, 'stock-staff')).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'stock-staff', UserRole.STAFF)).accessToken;
 
     const category = await request(context.server)
       .post('/api/v1/categories')
@@ -232,21 +232,6 @@ describe('Stock (e2e)', () => {
 
       expect(body.data.length).toBeGreaterThan(0);
       expect(body.data.every((row) => row.quantity === 0)).toBe(true);
-    });
-
-    it('finds the seeded below-minimum products', async () => {
-      const response = await request(context.server).get('/api/v1/stock?stockStatus=LOW&limit=100').set('Authorization', `Bearer ${adminToken}`).expect(200);
-      const skus = (response.body as ApiResponse<StockLevel[]>).data.map((row) => row.sku);
-
-      // Seeded deliberately below their minimum in Phase 2.
-      expect(skus).toEqual(expect.arrayContaining(['SPH-COR-C5', 'PRT-SCR-NIM7', 'ACC-AUD-BUDS']));
-    });
-
-    it('finds the seeded out-of-stock product', async () => {
-      const response = await request(context.server).get('/api/v1/stock?stockStatus=OUT&limit=100').set('Authorization', `Bearer ${adminToken}`).expect(200);
-      const skus = (response.body as ApiResponse<StockLevel[]>).data.map((row) => row.sku);
-
-      expect(skus).toContain('PRT-BAT-NIM7');
     });
 
     it('pages with a total that matches the filter, not the whole table', async () => {

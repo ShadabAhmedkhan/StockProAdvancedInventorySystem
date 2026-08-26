@@ -5,6 +5,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { CookieOptions, Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { SkipSubscriptionCheck } from '../common/decorators/skip-subscription-check.decorator';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { jwtConfig } from '../config/jwt.config';
@@ -29,6 +30,7 @@ const REFRESH_RATE_LIMIT = { default: { limit: 30, ttl: ONE_MINUTE_MS } };
 const USER_AGENT_MAX = 255;
 
 @ApiTags('Authentication')
+@SkipSubscriptionCheck()
 @Controller('auth')
 export class AuthController {
   constructor(

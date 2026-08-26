@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { AuditAction, AuditEntity } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { UpsertSettingDto } from './dto/upsert-setting.dto';
 import { invalidValueReason, withParsedValue, type SettingWithParsedValue } from './settings-views';
 
@@ -16,7 +17,7 @@ import { invalidValueReason, withParsedValue, type SettingWithParsedValue } from
 @Injectable()
 export class SettingsService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -27,7 +28,7 @@ export class SettingsService {
   }
 
   async findOne(key: string): Promise<SettingWithParsedValue> {
-    const setting = await this.prisma.setting.findUnique({ where: { key } });
+    const setting = await this.prisma.setting.findUnique({ where: { organizationId_key: { organizationId: getCurrentOrgId(), key } } });
 
     if (setting === null) {
       throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Setting not found' });
@@ -44,11 +45,12 @@ export class SettingsService {
       throw new BadRequestException({ code: ErrorCode.VALIDATION_ERROR, message: 'Validation failed', errors: [{ field: 'value', constraints: [reason] }] });
     }
 
-    const existing = await this.prisma.setting.findUnique({ where: { key }, select: { id: true } });
+    const organizationId = getCurrentOrgId();
+    const existing = await this.prisma.setting.findUnique({ where: { organizationId_key: { organizationId, key } }, select: { id: true } });
 
     const setting = await this.prisma.setting.upsert({
-      where: { key },
-      create: { key, value: dto.value, valueType: dto.valueType, description: dto.description ?? null },
+      where: { organizationId_key: { organizationId, key } },
+      create: { organizationId, key, value: dto.value, valueType: dto.valueType, description: dto.description ?? null },
       update: { value: dto.value, valueType: dto.valueType, ...(dto.description === undefined ? {} : { description: dto.description }) },
     });
 
@@ -66,7 +68,7 @@ export class SettingsService {
   async remove(key: string, callerId: string): Promise<SettingWithParsedValue> {
     const setting = await this.findOne(key);
 
-    await this.prisma.setting.delete({ where: { key } });
+    await this.prisma.setting.delete({ where: { organizationId_key: { organizationId: getCurrentOrgId(), key } } });
 
     await this.auditService.record({ userId: callerId, action: AuditAction.DELETE, entity: AuditEntity.SETTING, entityId: setting.id, metadata: { key } });
 

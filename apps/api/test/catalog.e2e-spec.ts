@@ -4,7 +4,7 @@ import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import type { Brand, Category } from '../src/generated/prisma/client';
 import { UserRole } from '../src/generated/prisma/enums';
-import { closeTestApp, createTestApp, registerUser, signInAs, type TestApp } from './support/auth.helper';
+import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 describe('Categories and brands (e2e)', () => {
   let context: TestApp;
@@ -38,7 +38,7 @@ describe('Categories and brands (e2e)', () => {
     });
 
     adminToken = (await signInAs(context, 'cat-admin', UserRole.ADMIN)).accessToken;
-    staffToken = (await registerUser(context, 'cat-staff')).accessToken;
+    staffToken = (await inviteTeammate(context, adminToken, 'cat-staff', UserRole.STAFF)).accessToken;
   });
 
   afterAll(async () => {

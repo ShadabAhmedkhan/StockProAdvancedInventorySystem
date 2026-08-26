@@ -313,10 +313,11 @@ a user is immediate: it revokes their refresh tokens, and `GET /auth/me` re-read
 
 ### Registration policy
 
-`POST /auth/register` is public, but a self-registration can never mint privileges: the
-**first** account on an empty database becomes the `ADMIN`, which is how a fresh
-deployment is bootstrapped, and every later self-registration is created as `STAFF`.
-Elevated roles are granted by an administrator through `POST /api/v1/users`.
+`POST /auth/register` is public. Every self-registration **founds a brand-new
+organization** and the registrant becomes its `ADMIN` - there is no shared "first user of
+the database" bootstrap and no open self-registration into an existing org. Teammates are
+added by an admin through `POST /api/v1/users`, which joins the caller's own organization;
+elevated roles are granted the same way.
 
 ### Other protections
 
@@ -330,6 +331,30 @@ Elevated roles are granted by an administrator through `POST /api/v1/users`.
   minimum 32 characters, and they must differ.
 - Password hashes are excluded by explicit `select`, so a future model change cannot leak
   one into a response.
+
+### Multi-tenancy
+
+Every tenant-scoped table carries an `organizationId`, enforced by a Prisma client
+extension that injects the current organization into every query - not by 182 manual
+`where` clauses. The current organization comes from the caller's JWT, populated into an
+`AsyncLocalStorage` context by `JwtAuthGuard` before any query runs; there is no code path
+that queries a tenant table outside that context. A resource belonging to another
+organization is invisible, not forbidden: a cross-tenant `GET`/`PATCH`/`DELETE` by id
+returns `404`, matching how the injected filter makes the row simply not exist from the
+requester's point of view.
+
+### Billing
+
+New organizations start `trialing` for 14 days. `POST /api/v1/billing/checkout-session`
+and `POST /api/v1/billing/portal-session` (both `ADMIN`-only) redirect to Stripe-hosted
+pages; `POST /api/v1/billing/webhook` is the Stripe-signature-verified endpoint that keeps
+`subscriptionStatus` in sync (`checkout.session.completed`, `customer.subscription.updated`
+/`.deleted`, `invoice.payment_failed`). Once an organization's trial has lapsed and it
+isn't `active`, every route except billing and auth answers `402` with an error code the
+frontend redirects on. Stripe is optional at the infrastructure level: with no
+`STRIPE_SECRET_KEY` configured the API still boots, just refuses to process billing
+requests. See `.env.example` for the three `STRIPE_*` variables and how to register a
+webhook locally with the Stripe CLI.
 
 ### Users
 

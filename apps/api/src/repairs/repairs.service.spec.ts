@@ -4,7 +4,8 @@ import { AuditService } from '../audit/audit.service';
 import { firstCallArg, lastCallArg } from '../common/testing/mock-args';
 import { Prisma } from '../generated/prisma/client';
 import { DeviceType, PaymentMethod, RepairStatus, StockMovementType, StockReferenceType, UserRole, UserStatus } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA } from '../prisma/tenant-prisma.provider';
+import * as tenantContext from '../common/tenant/tenant-context';
 import type { RepairQueryDto } from './dto/repair-query.dto';
 import { RepairsService } from './repairs.service';
 
@@ -67,6 +68,7 @@ describe('RepairsService', () => {
   let transaction: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     repairCreate = jest.fn(() => Promise.resolve({ id: REPAIR_ID }));
     repairUpdate = jest.fn(() => Promise.resolve({ id: REPAIR_ID }));
     repairFindUnique = jest.fn(() => Promise.resolve(repairRow()));
@@ -131,7 +133,7 @@ describe('RepairsService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         RepairsService,
-        { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
+        { provide: TENANT_PRISMA, useValue: { ...client, $transaction: transaction } },
         { provide: AuditService, useValue: { record: jest.fn(() => Promise.resolve()) } },
       ],
     }).compile();

@@ -1,11 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma } from '../generated/prisma/client';
 import { AuditAction, AuditEntity, ExpenseCategory, TransactionReferenceType, TransactionType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { CreateExpenseDto } from './dto/create-expense.dto';
 import type { CreateOtherIncomeDto } from './dto/create-other-income.dto';
 import type { ExpenseQueryDto } from './dto/expense-query.dto';
@@ -61,7 +62,7 @@ export interface FinanceSummary {
 @Injectable()
 export class FinanceService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -91,9 +92,12 @@ export class FinanceService {
   async createExpense(dto: CreateExpenseDto, userId: string): Promise<ExpenseWithCreator> {
     const expenseDate = dto.expenseDate ?? new Date();
 
+    const organizationId = getCurrentOrgId();
+
     return this.prisma.$transaction(async (tx) => {
       const expense = await tx.expense.create({
         data: {
+          organizationId,
           expenseNumber: await nextDocumentNumber(tx, 'EXPENSE'),
           category: dto.category,
           description: dto.description,
@@ -106,6 +110,7 @@ export class FinanceService {
 
       await tx.financialTransaction.create({
         data: {
+          organizationId,
           type: TransactionType.EXPENSE,
           amount: dto.amount,
           description: dto.description,
@@ -233,6 +238,7 @@ export class FinanceService {
   async recordOtherIncome(dto: CreateOtherIncomeDto, userId: string): Promise<TransactionWithCreator> {
     return this.prisma.financialTransaction.create({
       data: {
+        organizationId: getCurrentOrgId(),
         type: TransactionType.OTHER_INCOME,
         amount: dto.amount,
         description: dto.description,

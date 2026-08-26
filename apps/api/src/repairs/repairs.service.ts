@@ -1,10 +1,11 @@
-import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import type { CreatePaymentDto } from '../common/dto/create-payment.dto';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { consumeStock, releaseStock, reserveStock, type StockLine } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma, type Payment, type RepairStatusHistory } from '../generated/prisma/client';
 import {
   AuditAction,
@@ -18,7 +19,7 @@ import {
   UserRole,
   UserStatus,
 } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { ChangeRepairStatusDto } from './dto/change-repair-status.dto';
 import type { CreateRepairItemDto } from './dto/create-repair-item.dto';
 import type { CreateRepairDto } from './dto/create-repair.dto';
@@ -63,7 +64,7 @@ const TECHNICIAN_ROLES: readonly UserRole[] = [UserRole.TECHNICIAN, UserRole.ADM
 @Injectable()
 export class RepairsService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -115,6 +116,7 @@ export class RepairsService {
 
       const repair = await tx.repair.create({
         data: {
+          organizationId: getCurrentOrgId(),
           repairNumber: await nextDocumentNumber(tx, 'REPAIR'),
           customerId: dto.customerId,
           deviceType: dto.deviceType,
@@ -342,8 +344,11 @@ export class RepairsService {
         });
       }
 
+      const organizationId = getCurrentOrgId();
+
       const payment = await tx.payment.create({
         data: {
+          organizationId,
           paymentNumber: await nextDocumentNumber(tx, 'PAYMENT'),
           method: dto.method,
           amount: dto.amount,
@@ -358,6 +363,7 @@ export class RepairsService {
 
       await tx.financialTransaction.create({
         data: {
+          organizationId,
           type: TransactionType.REPAIR_PAYMENT,
           amount: payment.amount,
           description: `Repair payment ${payment.paymentNumber}`,
@@ -384,7 +390,7 @@ export class RepairsService {
   }
 
   /** Applies the new status, stamping the completion time when it is earned. */
-  private async applyStatus(tx: Prisma.TransactionClient, id: string, from: RepairStatus, to: RepairStatus): Promise<void> {
+  private async applyStatus(tx: TenantTransactionClient, id: string, from: RepairStatus, to: RepairStatus): Promise<void> {
     const completedAt = to === RepairStatus.COMPLETED ? Prisma.sql`, "completedAt" = NOW()` : Prisma.empty;
 
     const affected = await tx.$executeRaw`
@@ -417,7 +423,7 @@ export class RepairsService {
  * statement. Everything that edits a repair or its parts starts here, so an
  * edit and a status change can never interleave.
  */
-async function lockOpenRepair(tx: Prisma.TransactionClient, id: string): Promise<void> {
+async function lockOpenRepair(tx: TenantTransactionClient, id: string): Promise<void> {
   const open = Prisma.join(OPEN_REPAIR_STATUSES.map((status) => Prisma.sql`${status}::"RepairStatus"`));
 
   const affected = await tx.$executeRaw`
@@ -430,7 +436,7 @@ async function lockOpenRepair(tx: Prisma.TransactionClient, id: string): Promise
   }
 }
 
-async function explainClosedRepair(tx: Prisma.TransactionClient, id: string): Promise<ConflictException | NotFoundException> {
+async function explainClosedRepair(tx: TenantTransactionClient, id: string): Promise<ConflictException | NotFoundException> {
   const repair = await tx.repair.findUnique({ where: { id }, select: { status: true } });
 
   if (repair === null) {
@@ -451,7 +457,7 @@ function describeRefusedTransition(from: RepairStatus, to: RepairStatus): string
     : `A ${from} repair cannot become ${to}; it can only become ${allowed.join(' or ')}`;
 }
 
-async function loadPart(tx: Prisma.TransactionClient, productId: string): Promise<{ sku: string; sellingPrice: Prisma.Decimal }> {
+async function loadPart(tx: TenantTransactionClient, productId: string): Promise<{ sku: string; sellingPrice: Prisma.Decimal }> {
   const product = await tx.product.findUnique({
     where: { id: productId },
     select: { sku: true, sellingPrice: true, isActive: true, deletedAt: true },
@@ -469,7 +475,7 @@ async function loadPart(tx: Prisma.TransactionClient, productId: string): Promis
   return { sku: product.sku, sellingPrice: product.sellingPrice };
 }
 
-async function assertPartNotAlreadyFitted(tx: Prisma.TransactionClient, repairId: string, productId: string, sku: string): Promise<void> {
+async function assertPartNotAlreadyFitted(tx: TenantTransactionClient, repairId: string, productId: string, sku: string): Promise<void> {
   const existing = await tx.repairItem.findUnique({ where: { repairId_productId: { repairId, productId } }, select: { id: true } });
 
   if (existing !== null) {
@@ -488,7 +494,7 @@ interface RepairItemForUpdate {
   product: { sku: string };
 }
 
-async function findItem(tx: Prisma.TransactionClient, repairId: string, itemId: string): Promise<RepairItemForUpdate> {
+async function findItem(tx: TenantTransactionClient, repairId: string, itemId: string): Promise<RepairItemForUpdate> {
   const item = await tx.repairItem.findUnique({
     where: { id: itemId },
     select: { repairId: true, productId: true, quantity: true, unitPrice: true, product: { select: { sku: true } } },
@@ -503,7 +509,7 @@ async function findItem(tx: Prisma.TransactionClient, repairId: string, itemId: 
   return item;
 }
 
-async function stockLines(tx: Prisma.TransactionClient, repairId: string): Promise<StockLine[]> {
+async function stockLines(tx: TenantTransactionClient, repairId: string): Promise<StockLine[]> {
   const items = await tx.repairItem.findMany({
     where: { repairId },
     select: { productId: true, quantity: true, product: { select: { sku: true } } },
@@ -512,7 +518,7 @@ async function stockLines(tx: Prisma.TransactionClient, repairId: string): Promi
   return items.map((item) => ({ productId: item.productId, quantity: item.quantity, sku: item.product.sku }));
 }
 
-async function assertCustomerUsable(tx: Prisma.TransactionClient, customerId: string | undefined): Promise<void> {
+async function assertCustomerUsable(tx: TenantTransactionClient, customerId: string | undefined): Promise<void> {
   if (customerId === undefined) {
     return;
   }
@@ -529,7 +535,7 @@ async function assertCustomerUsable(tx: Prisma.TransactionClient, customerId: st
  * is. Assigning work to a deactivated account, or to a salesperson, leaves a
  * job nobody is actually looking at.
  */
-async function assertTechnicianUsable(tx: Prisma.TransactionClient, technicianId: string | undefined): Promise<void> {
+async function assertTechnicianUsable(tx: TenantTransactionClient, technicianId: string | undefined): Promise<void> {
   if (technicianId === undefined) {
     return;
   }

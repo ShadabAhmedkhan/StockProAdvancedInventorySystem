@@ -284,13 +284,13 @@ export interface SeededCatalog {
  * Opening stock is written as a PURCHASE movement alongside the Inventory row,
  * because the ledger must be able to account for every unit on hand.
  */
-export async function seedCatalog(createdById: string): Promise<SeededCatalog> {
+export async function seedCatalog(organizationId: string, createdById: string): Promise<SeededCatalog> {
   const categories = await Promise.all(
     CATEGORIES.map((category) =>
       prisma.category.upsert({
-        where: { slug: category.slug },
+        where: { organizationId_slug: { organizationId, slug: category.slug } },
         update: { name: category.name, description: category.description },
-        create: category,
+        create: { ...category, organizationId },
         select: { id: true, slug: true },
       }),
     ),
@@ -300,9 +300,9 @@ export async function seedCatalog(createdById: string): Promise<SeededCatalog> {
   const brands = await Promise.all(
     BRANDS.map((brand) =>
       prisma.brand.upsert({
-        where: { slug: brand.slug },
+        where: { organizationId_slug: { organizationId, slug: brand.slug } },
         update: { name: brand.name },
-        create: brand,
+        create: { ...brand, organizationId },
         select: { id: true, slug: true },
       }),
     ),
@@ -320,7 +320,7 @@ export async function seedCatalog(createdById: string): Promise<SeededCatalog> {
     }
 
     const product = await prisma.product.upsert({
-      where: { sku: definition.sku },
+      where: { organizationId_sku: { organizationId, sku: definition.sku } },
       update: {
         name: definition.name,
         barcode: definition.barcode,
@@ -331,6 +331,7 @@ export async function seedCatalog(createdById: string): Promise<SeededCatalog> {
         minimumStock: definition.minimumStock,
       },
       create: {
+        organizationId,
         sku: definition.sku,
         barcode: definition.barcode,
         name: definition.name,
@@ -352,11 +353,12 @@ export async function seedCatalog(createdById: string): Promise<SeededCatalog> {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.inventory.create({ data: { productId: product.id, quantity: definition.openingStock } });
+      await tx.inventory.create({ data: { organizationId, productId: product.id, quantity: definition.openingStock } });
 
       if (definition.openingStock > 0) {
         await tx.stockMovement.create({
           data: {
+            organizationId,
             productId: product.id,
             type: StockMovementType.PURCHASE,
             quantity: definition.openingStock,

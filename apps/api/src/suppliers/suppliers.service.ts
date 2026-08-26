@@ -1,16 +1,17 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { searchAcross } from '../common/pagination/search.util';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import type { Prisma, Supplier } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { CreateSupplierDto } from './dto/create-supplier.dto';
 import type { SupplierQueryDto } from './dto/supplier-query.dto';
 import type { UpdateSupplierDto } from './dto/update-supplier.dto';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient) {}
 
   async findAll(query: SupplierQueryDto): Promise<Paginated<Supplier>> {
     const where = buildWhere(query);
@@ -45,6 +46,7 @@ export class SuppliersService {
 
     return this.prisma.supplier.create({
       data: {
+        organizationId: getCurrentOrgId(),
         supplierCode: dto.supplierCode,
         name: dto.name,
         contactPerson: dto.contactPerson ?? null,
@@ -103,7 +105,10 @@ export class SuppliersService {
    * Saying so is better than letting the caller retry against an invisible row.
    */
   private async assertCodeAvailable(supplierCode: string, exceptId?: string): Promise<void> {
-    const existing = await this.prisma.supplier.findUnique({ where: { supplierCode }, select: { id: true, deletedAt: true } });
+    const existing = await this.prisma.supplier.findUnique({
+      where: { organizationId_supplierCode: { organizationId: getCurrentOrgId(), supplierCode } },
+      select: { id: true, deletedAt: true },
+    });
 
     if (existing === null || existing.id === exceptId) {
       return;

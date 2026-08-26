@@ -1,9 +1,10 @@
-import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { consumeStock, releaseStock, reserveStock, type StockLine } from '../common/inventory/stock-operations';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma, type Payment } from '../generated/prisma/client';
 import {
   AuditAction,
@@ -15,7 +16,7 @@ import {
   TransactionReferenceType,
   TransactionType,
 } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { CreateOrderItemDto } from './dto/create-order-item.dto';
 import type { CreatePaymentDto } from '../common/dto/create-payment.dto';
 import type { CreateOrderDto } from './dto/create-order.dto';
@@ -48,7 +49,7 @@ import { buildOrderWhere, ORDER_DETAIL_INCLUDE, ORDER_SUMMARY_INCLUDE, withOutst
 @Injectable()
 export class OrdersService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -83,6 +84,7 @@ export class OrdersService {
 
       const order = await tx.order.create({
         data: {
+          organizationId: getCurrentOrgId(),
           orderNumber: await nextDocumentNumber(tx, 'ORDER'),
           customerId: dto.customerId ?? null,
           notes: dto.notes ?? null,
@@ -273,8 +275,11 @@ export class OrdersService {
         throw await explainRejectedPayment(tx, id, money(dto.amount));
       }
 
+      const organizationId = getCurrentOrgId();
+
       const payment = await tx.payment.create({
         data: {
+          organizationId,
           paymentNumber: await nextDocumentNumber(tx, 'PAYMENT'),
           method: dto.method,
           amount: dto.amount,
@@ -289,6 +294,7 @@ export class OrdersService {
 
       await tx.financialTransaction.create({
         data: {
+          organizationId,
           type: TransactionType.SALE,
           amount: payment.amount,
           description: `Order payment ${payment.paymentNumber}`,
@@ -329,7 +335,7 @@ export class OrdersService {
   }
 
   /** Moves the order between states, or explains why it will not move. */
-  private async transition(tx: Prisma.TransactionClient, id: string, from: OrderStatus, to: OrderStatus): Promise<void> {
+  private async transition(tx: TenantTransactionClient, id: string, from: OrderStatus, to: OrderStatus): Promise<void> {
     // Completion is the only transition that stamps a time, because revenue
     // reporting keys off it rather than off when the draft was raised.
     const completedAt = to === OrderStatus.COMPLETED ? Prisma.sql`, "completedAt" = NOW()` : Prisma.empty;
@@ -357,7 +363,7 @@ function money(value: string | undefined): Prisma.Decimal {
  * confirmation can never interleave, and returns the amounts the caller needs
  * to re-price the order.
  */
-async function lockDraft(tx: Prisma.TransactionClient, id: string): Promise<{ discount: Prisma.Decimal; tax: Prisma.Decimal }> {
+async function lockDraft(tx: TenantTransactionClient, id: string): Promise<{ discount: Prisma.Decimal; tax: Prisma.Decimal }> {
   const affected = await tx.$executeRaw`
     UPDATE "Order" SET "updatedAt" = NOW()
     WHERE "id" = ${id}::uuid AND "status" = 'DRAFT'::"OrderStatus"
@@ -370,7 +376,7 @@ async function lockDraft(tx: Prisma.TransactionClient, id: string): Promise<{ di
   return tx.order.findUniqueOrThrow({ where: { id }, select: { discount: true, tax: true } });
 }
 
-async function insertItem(tx: Prisma.TransactionClient, orderId: string, dto: CreateOrderItemDto): Promise<void> {
+async function insertItem(tx: TenantTransactionClient, orderId: string, dto: CreateOrderItemDto): Promise<void> {
   const product = await tx.product.findUnique({
     where: { id: dto.productId },
     select: { sku: true, sellingPrice: true, isActive: true, deletedAt: true },
@@ -412,7 +418,7 @@ async function insertItem(tx: Prisma.TransactionClient, orderId: string, dto: Cr
  * one product lookup and one insert instead of two round-trips per line. Only usable when
  * `orderId` has no existing items yet (true for a brand-new draft), since that lets the
  * duplicate-productId check run in memory instead of a per-item query. */
-async function insertItems(tx: Prisma.TransactionClient, orderId: string, items: CreateOrderItemDto[]): Promise<void> {
+async function insertItems(tx: TenantTransactionClient, orderId: string, items: CreateOrderItemDto[]): Promise<void> {
   if (items.length === 0) return;
 
   const products = await tx.product.findMany({
@@ -449,7 +455,7 @@ async function insertItems(tx: Prisma.TransactionClient, orderId: string, items:
   await tx.orderItem.createMany({ data: rows });
 }
 
-async function findItem(tx: Prisma.TransactionClient, orderId: string, itemId: string): Promise<OrderItemForUpdate> {
+async function findItem(tx: TenantTransactionClient, orderId: string, itemId: string): Promise<OrderItemForUpdate> {
   const item = await tx.orderItem.findUnique({
     where: { id: itemId },
     select: { orderId: true, quantity: true, unitPrice: true, discount: true, product: { select: { sku: true } } },
@@ -488,7 +494,7 @@ function pricedLine(line: LineAmounts, sku: string): Prisma.Decimal {
  * Recomputes the order totals from the lines that are actually in the
  * database, so a total can never drift away from what it is the sum of.
  */
-async function reprice(tx: Prisma.TransactionClient, orderId: string, discount: Prisma.Decimal, tax: Prisma.Decimal): Promise<void> {
+async function reprice(tx: TenantTransactionClient, orderId: string, discount: Prisma.Decimal, tax: Prisma.Decimal): Promise<void> {
   const items = await tx.orderItem.findMany({ where: { orderId }, select: { quantity: true, unitPrice: true, discount: true } });
   const totals = orderTotals(items, discount, tax);
 
@@ -502,7 +508,7 @@ async function reprice(tx: Prisma.TransactionClient, orderId: string, discount: 
   await tx.order.update({ where: { id: orderId }, data: { subtotal: totals.subtotal, discount, tax, total: totals.total } });
 }
 
-async function stockLines(tx: Prisma.TransactionClient, orderId: string): Promise<StockLine[]> {
+async function stockLines(tx: TenantTransactionClient, orderId: string): Promise<StockLine[]> {
   const items = await tx.orderItem.findMany({
     where: { orderId },
     select: { productId: true, quantity: true, product: { select: { sku: true } } },
@@ -511,7 +517,7 @@ async function stockLines(tx: Prisma.TransactionClient, orderId: string): Promis
   return items.map((item) => ({ productId: item.productId, quantity: item.quantity, sku: item.product.sku }));
 }
 
-async function assertCustomerUsable(tx: Prisma.TransactionClient, customerId: string | undefined): Promise<void> {
+async function assertCustomerUsable(tx: TenantTransactionClient, customerId: string | undefined): Promise<void> {
   if (customerId === undefined) {
     return;
   }
@@ -524,7 +530,7 @@ async function assertCustomerUsable(tx: Prisma.TransactionClient, customerId: st
 }
 
 /** Reached only on a failure path, so the extra read costs nothing normally. */
-async function explainRejectedTransition(tx: Prisma.TransactionClient, id: string, from: OrderStatus): Promise<ConflictException | NotFoundException> {
+async function explainRejectedTransition(tx: TenantTransactionClient, id: string, from: OrderStatus): Promise<ConflictException | NotFoundException> {
   const order = await tx.order.findUnique({ where: { id }, select: { status: true } });
 
   if (order === null) {
@@ -534,7 +540,7 @@ async function explainRejectedTransition(tx: Prisma.TransactionClient, id: strin
   return new ConflictException({ code: ErrorCode.CONFLICT, message: `This order is ${order.status}; that action needs it to be ${from}` });
 }
 
-async function explainRejectedPayment(tx: Prisma.TransactionClient, id: string, amount: Prisma.Decimal): Promise<ConflictException | NotFoundException> {
+async function explainRejectedPayment(tx: TenantTransactionClient, id: string, amount: Prisma.Decimal): Promise<ConflictException | NotFoundException> {
   const order = await tx.order.findUnique({ where: { id }, select: { status: true, total: true, paidAmount: true } });
 
   if (order === null) {

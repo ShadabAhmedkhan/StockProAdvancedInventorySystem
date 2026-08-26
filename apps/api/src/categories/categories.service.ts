@@ -1,17 +1,18 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { searchAcross } from '../common/pagination/search.util';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { slugify } from '../common/utils/slug.util';
 import type { Category, Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient } from '../prisma/tenant-prisma.provider';
 import type { CategoryQueryDto } from './dto/category-query.dto';
 import type { CreateCategoryDto } from './dto/create-category.dto';
 import type { UpdateCategoryDto } from './dto/update-category.dto';
 
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient) {}
 
   async findAll(query: CategoryQueryDto): Promise<Paginated<Category>> {
     const where = buildWhere(query);
@@ -42,7 +43,7 @@ export class CategoriesService {
     await this.assertSlugAvailable(slug);
 
     return this.prisma.category.create({
-      data: { name: dto.name, slug, description: dto.description ?? null },
+      data: { organizationId: getCurrentOrgId(), name: dto.name, slug, description: dto.description ?? null },
     });
   }
 
@@ -122,7 +123,10 @@ export class CategoriesService {
   }
 
   private async assertNameAvailable(name: string, exceptId?: string): Promise<void> {
-    const existing = await this.prisma.category.findUnique({ where: { name }, select: { id: true, deletedAt: true } });
+    const existing = await this.prisma.category.findUnique({
+      where: { organizationId_name: { organizationId: getCurrentOrgId(), name } },
+      select: { id: true, deletedAt: true },
+    });
 
     if (existing === null || existing.id === exceptId) {
       return;
@@ -136,7 +140,10 @@ export class CategoriesService {
   }
 
   private async assertSlugAvailable(slug: string, exceptId?: string): Promise<void> {
-    const existing = await this.prisma.category.findUnique({ where: { slug }, select: { id: true, deletedAt: true } });
+    const existing = await this.prisma.category.findUnique({
+      where: { organizationId_slug: { organizationId: getCurrentOrgId(), slug } },
+      select: { id: true, deletedAt: true },
+    });
 
     if (existing === null || existing.id === exceptId) {
       return;

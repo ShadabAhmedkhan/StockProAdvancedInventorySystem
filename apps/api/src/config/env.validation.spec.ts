@@ -3,9 +3,10 @@ import { NodeEnvironment, validateEnv } from './env.validation';
 const DATABASE_URL = 'postgresql://stockpro:stockpro@localhost:5433/stockpro?schema=public';
 const JWT_ACCESS_SECRET = 'access-secret-that-is-long-enough-abcdef';
 const JWT_REFRESH_SECRET = 'refresh-secret-that-is-long-enough-abcde';
+const PLATFORM_ADMIN_JWT_SECRET = 'platform-admin-secret-that-is-long-enough';
 
 /** The minimum a valid environment must supply; everything else has a default. */
-const REQUIRED = { DATABASE_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET };
+const REQUIRED = { DATABASE_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, PLATFORM_ADMIN_JWT_SECRET };
 
 describe('validateEnv', () => {
   it('applies defaults when only the required values are provided', () => {
@@ -61,14 +62,34 @@ describe('validateEnv', () => {
     });
 
     it('accepts secrets of exactly the minimum length', () => {
-      expect(() => validateEnv({ DATABASE_URL, JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'b'.repeat(32) })).not.toThrow();
+      expect(() =>
+        validateEnv({ DATABASE_URL, JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'b'.repeat(32), PLATFORM_ADMIN_JWT_SECRET: 'c'.repeat(32) }),
+      ).not.toThrow();
     });
 
     it('refuses to reuse one secret for both token kinds', () => {
       const shared = 'the-same-secret-used-for-both-kinds-oops';
 
-      expect(() => validateEnv({ DATABASE_URL, JWT_ACCESS_SECRET: shared, JWT_REFRESH_SECRET: shared })).toThrow(
+      expect(() => validateEnv({ DATABASE_URL, JWT_ACCESS_SECRET: shared, JWT_REFRESH_SECRET: shared, PLATFORM_ADMIN_JWT_SECRET })).toThrow(
         /JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET/,
+      );
+    });
+  });
+
+  describe('platform-admin JWT secret', () => {
+    it.each([
+      ['missing', {}],
+      ['too short', { PLATFORM_ADMIN_JWT_SECRET: 'short' }],
+    ])('refuses to start when the secret is %s', (_label, overrides: Record<string, unknown>) => {
+      expect(() => validateEnv({ DATABASE_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, ...overrides })).toThrow(/PLATFORM_ADMIN_JWT_SECRET/);
+    });
+
+    it.each([
+      ['the access secret', JWT_ACCESS_SECRET],
+      ['the refresh secret', JWT_REFRESH_SECRET],
+    ])('refuses to reuse %s', (_label, shared: string) => {
+      expect(() => validateEnv({ DATABASE_URL, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET, PLATFORM_ADMIN_JWT_SECRET: shared })).toThrow(
+        /PLATFORM_ADMIN_JWT_SECRET must differ from JWT_ACCESS_SECRET and JWT_REFRESH_SECRET/,
       );
     });
   });

@@ -1,9 +1,10 @@
-import { ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { restoreStock, type StockLine } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
+import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma, type Payment } from '../generated/prisma/client';
 import {
   AuditAction,
@@ -17,7 +18,7 @@ import {
   TransactionReferenceType,
   TransactionType,
 } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { CompleteReturnDto } from './dto/complete-return.dto';
 import type { CreateReturnItemDto } from './dto/create-return-item.dto';
 import type { CreateReturnDto } from './dto/create-return.dto';
@@ -59,7 +60,7 @@ const ZERO = new Prisma.Decimal(0);
 @Injectable()
 export class ReturnsService {
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(TENANT_PRISMA) private readonly prisma: TenantPrismaClient,
     private readonly auditService: AuditService,
   ) {}
 
@@ -107,6 +108,7 @@ export class ReturnsService {
 
       const record = await tx.return.create({
         data: {
+          organizationId: getCurrentOrgId(),
           returnNumber: await nextDocumentNumber(tx, 'RETURN'),
           orderId: dto.orderId,
           // Taken from the order rather than the request: a return belongs to
@@ -261,8 +263,11 @@ export class ReturnsService {
       // was never paid for - and the database rejects a payment of nothing, so
       // there is simply no payment to write.
       if (cash.gt(ZERO)) {
+        const organizationId = getCurrentOrgId();
+
         const payment = await tx.payment.create({
           data: {
+            organizationId,
             paymentNumber: await nextDocumentNumber(tx, 'PAYMENT'),
             method: dto.method,
             amount: cash,
@@ -276,6 +281,7 @@ export class ReturnsService {
 
         await tx.financialTransaction.create({
           data: {
+            organizationId,
             type: TransactionType.REFUND,
             amount: payment.amount,
             description: `Refund for return ${payment.paymentNumber}`,
@@ -313,7 +319,7 @@ export class ReturnsService {
   }
 
   /** Moves the return between states, and reports the credit it stands for. */
-  private async transition(tx: Prisma.TransactionClient, id: string, from: ReturnStatus, to: ReturnStatus): Promise<Prisma.Decimal> {
+  private async transition(tx: TenantTransactionClient, id: string, from: ReturnStatus, to: ReturnStatus): Promise<Prisma.Decimal> {
     const completedAt = to === ReturnStatus.COMPLETED ? Prisma.sql`, "completedAt" = NOW()` : Prisma.empty;
 
     const rows = await tx.$queryRaw<{ refundAmount: string }[]>`
@@ -341,7 +347,7 @@ export class ReturnsService {
  * is what stops two returns raised at the same instant both taking back the
  * last unit of a line.
  */
-async function lockOrder(tx: Prisma.TransactionClient, orderId: string): Promise<LockedOrder> {
+async function lockOrder(tx: TenantTransactionClient, orderId: string): Promise<LockedOrder> {
   const [order] = await tx.$queryRaw<{ orderNumber: string; status: OrderStatus; customerId: string | null; paidAmount: string }[]>`
     SELECT "orderNumber", "status", "customerId", "paidAmount"::text AS "paidAmount"
     FROM "Order" WHERE "id" = ${orderId}::uuid FOR UPDATE
@@ -365,7 +371,7 @@ interface LockedOrder {
  * Takes the return's row lock and asserts it is still pending, in one
  * statement, so a line cannot be changed beside an approval already under way.
  */
-async function lockPendingReturn(tx: Prisma.TransactionClient, id: string): Promise<{ orderId: string }> {
+async function lockPendingReturn(tx: TenantTransactionClient, id: string): Promise<{ orderId: string }> {
   const rows = await tx.$queryRaw<{ orderId: string }[]>`
     UPDATE "Return" SET "updatedAt" = NOW()
     WHERE "id" = ${id}::uuid AND "status" = 'PENDING'::"ReturnStatus"
@@ -382,7 +388,7 @@ async function lockPendingReturn(tx: Prisma.TransactionClient, id: string): Prom
 }
 
 async function explainRejectedTransition(
-  tx: Prisma.TransactionClient,
+  tx: TenantTransactionClient,
   id: string,
   from: ReturnStatus,
   to: ReturnStatus,
@@ -408,7 +414,7 @@ async function explainRejectedTransition(
 }
 
 /** Adds a line, priced against what the order line was actually charged. */
-async function insertItem(tx: Prisma.TransactionClient, returnId: string, orderId: string, dto: CreateReturnItemDto): Promise<void> {
+async function insertItem(tx: TenantTransactionClient, returnId: string, orderId: string, dto: CreateReturnItemDto): Promise<void> {
   const orderItem = await tx.orderItem.findUnique({
     where: { id: dto.orderItemId },
     select: { orderId: true, productId: true, quantity: true, unitPrice: true, total: true, product: { select: { sku: true } } },
@@ -460,11 +466,7 @@ async function insertItem(tx: Prisma.TransactionClient, returnId: string, orderI
  * changing a quantity is measured against everything else rather than against
  * itself.
  */
-async function lineHistory(
-  tx: Prisma.TransactionClient,
-  orderItemId: string,
-  exceptItemId: string | null,
-): Promise<{ sold: SoldLine; already: ReturnedSoFar }> {
+async function lineHistory(tx: TenantTransactionClient, orderItemId: string, exceptItemId: string | null): Promise<{ sold: SoldLine; already: ReturnedSoFar }> {
   const orderItem = await tx.orderItem.findUniqueOrThrow({ where: { id: orderItemId }, select: { quantity: true, total: true } });
 
   const claimed = await tx.returnItem.aggregate({
@@ -493,7 +495,7 @@ function assertWithinRemainder(sold: SoldLine, already: ReturnedSoFar, quantity:
   }
 }
 
-async function findItem(tx: Prisma.TransactionClient, returnId: string, itemId: string): Promise<ReturnItemForUpdate> {
+async function findItem(tx: TenantTransactionClient, returnId: string, itemId: string): Promise<ReturnItemForUpdate> {
   const item = await tx.returnItem.findUnique({
     where: { id: itemId },
     select: { id: true, returnId: true, orderItemId: true, quantity: true, product: { select: { sku: true } } },
@@ -515,13 +517,13 @@ interface ReturnItemForUpdate {
 }
 
 /** Keeps the stored credit equal to the sum of the lines it is made of. */
-async function recomputeRefund(tx: Prisma.TransactionClient, returnId: string): Promise<void> {
+async function recomputeRefund(tx: TenantTransactionClient, returnId: string): Promise<void> {
   const items = await tx.returnItem.findMany({ where: { returnId }, select: { total: true } });
 
   await tx.return.update({ where: { id: returnId }, data: { refundAmount: totalRefund(items.map((item) => item.total)) } });
 }
 
-async function restockableLines(tx: Prisma.TransactionClient, returnId: string): Promise<StockLine[]> {
+async function restockableLines(tx: TenantTransactionClient, returnId: string): Promise<StockLine[]> {
   const items = await tx.returnItem.findMany({
     where: { returnId, restock: true },
     select: { productId: true, quantity: true, product: { select: { sku: true } } },
@@ -531,7 +533,7 @@ async function restockableLines(tx: Prisma.TransactionClient, returnId: string):
 }
 
 /** What has already gone back to the customer against this order. */
-async function refundedOnOrder(tx: Prisma.TransactionClient, orderId: string): Promise<Prisma.Decimal> {
+async function refundedOnOrder(tx: TenantTransactionClient, orderId: string): Promise<Prisma.Decimal> {
   const refunds = await tx.payment.aggregate({
     where: { referenceType: PaymentReferenceType.RETURN, returnRecord: { orderId } },
     _sum: { amount: true },

@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import * as tenantContext from '../common/tenant/tenant-context';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService, type StockSummary } from '../stock/stock.service';
@@ -23,6 +24,7 @@ describe('ReportsService', () => {
   let stockSummary: jest.Mock;
 
   beforeEach(async () => {
+    jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     queryRaw = jest.fn(() => Promise.resolve([]));
     stockSummary = jest.fn(() => Promise.resolve(STOCK_SUMMARY));
 

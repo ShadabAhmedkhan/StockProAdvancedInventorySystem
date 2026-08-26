@@ -29,16 +29,16 @@ function readPayload(payload: unknown): AuthenticatedUser | undefined {
   if (typeof payload !== 'object' || payload === null) {
     return undefined;
   }
-  if (!('sub' in payload) || !('email' in payload) || !('role' in payload)) {
+  if (!('sub' in payload) || !('email' in payload) || !('role' in payload) || !('organizationId' in payload)) {
     return undefined;
   }
 
-  const { sub, email, role } = payload;
-  if (typeof sub !== 'string' || sub === '' || typeof email !== 'string' || !isUserRole(role)) {
+  const { sub, email, role, organizationId } = payload;
+  if (typeof sub !== 'string' || sub === '' || typeof email !== 'string' || !isUserRole(role) || typeof organizationId !== 'string' || organizationId === '') {
     return undefined;
   }
 
-  return { id: sub, email, role };
+  return { id: sub, email, role, organizationId };
 }
 
 function extractBearerToken(request: Request): string | undefined {
@@ -85,6 +85,11 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException({ code: ErrorCode.UNAUTHORIZED, message: 'Invalid or expired access token' });
     }
 
+    // Only sets `request.user` here - it does not establish the tenant context itself.
+    // A guard's `canActivate` completing does not hand off to the controller as a direct
+    // continuation (Nest calls the handler through its own RxJS pipeline afterward), so
+    // an `enterWith` here would not survive into the controller/service call. That is
+    // `TenantContextInterceptor`'s job, reading `request.user` right before `next.handle()`.
     request.user = user;
     return true;
   }
