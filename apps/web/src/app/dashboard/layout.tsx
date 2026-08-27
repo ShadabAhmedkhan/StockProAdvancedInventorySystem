@@ -1,5 +1,6 @@
 'use client';
 
+import { Boxes } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { DashboardNav } from '@/components/dashboard-nav';
@@ -30,19 +31,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return null;
   }
 
+  const initials = `${user.firstName[0] ?? ''}${user.lastName[0] ?? ''}`.toUpperCase();
+
   return (
-    <div className="min-h-screen">
-      <header className="flex items-center justify-between border-b border-border px-6 py-3">
-        <span className="font-semibold">Stock Pro</span>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="text-muted-foreground">
-            {user.firstName} {user.lastName} &middot; {user.role}
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface px-6 py-3 shadow-xs">
+        <span className="flex items-center gap-2 font-semibold">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <Boxes className="h-4 w-4" />
           </span>
+          Stock Pro
+        </span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 rounded-full border border-border bg-muted py-1 pl-1 pr-3 text-sm">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+              {initials}
+            </span>
+            <span className="text-muted-foreground">
+              {user.firstName} {user.lastName} &middot; {user.role}
+            </span>
+          </div>
           <LogoutButton />
         </div>
       </header>
-      <DashboardNav />
-      <main className="p-6">{children}</main>
+      <div className="sticky top-[57px] z-10">
+        <DashboardNav />
+      </div>
+      <main className="animate-in mx-auto max-w-[1600px] p-6">{children}</main>
     </div>
   );
 }
