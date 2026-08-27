@@ -4,12 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { PdfDownloadButton } from '@/components/pdf-download-button';
 import { Select } from '@/components/ui/select';
 import { reportsApi } from '@/features/reports/api';
 import type { SalesReportPeriod } from '@/features/reports/types';
 import { cn } from '@/lib/utils';
 import { errorMessage } from '@/lib/error-message';
 import { formatCurrency, formatNumber, formatShortDate } from '@/lib/format';
+import { exportTableToPdf } from '@/lib/pdf-export';
 
 const TABS = ['Sales', 'Inventory', 'Top products'] as const;
 type Tab = (typeof TABS)[number];
@@ -87,9 +89,42 @@ function SalesTab({ from, to }: { from: string; to: string }): React.JSX.Element
     queryFn: () => reportsApi.sales({ from: from === '' ? undefined : from, to: to === '' ? undefined : to, groupBy }),
   });
 
+  function handleDownload(): void {
+    if (data === undefined) return;
+    exportTableToPdf({
+      title: 'Sales report',
+      subtitle: `Grouped by ${PERIOD_LABELS[groupBy].toLowerCase()}`,
+      range: from === '' && to === '' ? 'All time' : `${from === '' ? 'Start' : from} to ${to === '' ? 'now' : to}`,
+      summary: [
+        { label: 'Orders', value: formatNumber(data.totals.orders) },
+        { label: 'Subtotal', value: formatCurrency(data.totals.subtotal) },
+        { label: 'Discount', value: formatCurrency(data.totals.discount) },
+        { label: 'Total revenue', value: formatCurrency(data.totals.total) },
+      ],
+      columns: [
+        { header: 'Period' },
+        { header: 'Orders', align: 'right' },
+        { header: 'Subtotal', align: 'right' },
+        { header: 'Discount', align: 'right' },
+        { header: 'Tax', align: 'right' },
+        { header: 'Total', align: 'right' },
+      ],
+      rows: data.points.map((point) => [
+        formatShortDate(point.period),
+        formatNumber(point.orders),
+        formatCurrency(point.subtotal),
+        formatCurrency(point.discount),
+        formatCurrency(point.tax),
+        formatCurrency(point.total),
+      ]),
+      filename: `sales-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+    });
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <PdfDownloadButton onDownload={handleDownload} disabled={data === undefined} />
         <Select
           value={groupBy}
           onChange={(event) => {
@@ -166,6 +201,39 @@ function InventoryTab(): React.JSX.Element {
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading...</p>;
   if (isError || data === undefined) return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
 
+  function handleDownload(): void {
+    if (data === undefined) return;
+    exportTableToPdf({
+      title: 'Inventory valuation report',
+      subtitle: 'Stock valued by category',
+      summary: [
+        { label: 'Products', value: formatNumber(data.totals.totalProducts) },
+        { label: 'Units on hand', value: formatNumber(data.totals.totalUnits) },
+        { label: 'Value at cost', value: formatCurrency(data.totals.inventoryValueAtCost) },
+        { label: 'Value at retail', value: formatCurrency(data.totals.inventoryValueAtRetail) },
+      ],
+      columns: [
+        { header: 'Category' },
+        { header: 'Products', align: 'right' },
+        { header: 'Units', align: 'right' },
+        { header: 'Value at cost', align: 'right' },
+        { header: 'Value at retail', align: 'right' },
+        { header: 'Low stock', align: 'right' },
+        { header: 'Out of stock', align: 'right' },
+      ],
+      rows: data.categories.map((category) => [
+        category.categoryName,
+        formatNumber(category.productCount),
+        formatNumber(category.totalUnits),
+        formatCurrency(category.valueAtCost),
+        formatCurrency(category.valueAtRetail),
+        formatNumber(category.lowStockCount),
+        formatNumber(category.outOfStockCount),
+      ]),
+      filename: `inventory-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -182,6 +250,7 @@ function InventoryTab(): React.JSX.Element {
       <Card>
         <CardHeader>
           <CardTitle>By category</CardTitle>
+          <PdfDownloadButton onDownload={handleDownload} />
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -231,8 +300,30 @@ function TopProductsTab({ from, to }: { from: string; to: string }): React.JSX.E
     queryFn: () => reportsApi.topProducts({ from: from === '' ? undefined : from, to: to === '' ? undefined : to }),
   });
 
+  function handleDownload(): void {
+    if (data === undefined) return;
+    exportTableToPdf({
+      title: 'Top products report',
+      subtitle: 'Best sellers by revenue',
+      range: from === '' && to === '' ? 'All time' : `${from === '' ? 'Start' : from} to ${to === '' ? 'now' : to}`,
+      columns: [
+        { header: '#', align: 'right' },
+        { header: 'Product' },
+        { header: 'SKU' },
+        { header: 'Units sold', align: 'right' },
+        { header: 'Revenue', align: 'right' },
+      ],
+      rows: data.map((product, index) => [index + 1, product.name, product.sku, formatNumber(product.quantitySold), formatCurrency(product.revenue)]),
+      filename: `top-products-report-${new Date().toISOString().slice(0, 10)}.pdf`,
+    });
+  }
+
   return (
     <Card>
+      <CardHeader>
+        <CardTitle>Top products</CardTitle>
+        <PdfDownloadButton onDownload={handleDownload} disabled={data === undefined} />
+      </CardHeader>
       <CardContent className="p-0">
         {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
         {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
