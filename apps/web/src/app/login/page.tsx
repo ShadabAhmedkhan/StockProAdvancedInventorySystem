@@ -6,6 +6,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { useAuth } from '@/hooks/use-auth';
 import { errorMessage } from '@/lib/error-message';
 
@@ -52,6 +53,9 @@ function LoginForm(): React.JSX.Element | null {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
+      <div className="fixed right-4 top-4">
+        <ThemeToggle />
+      </div>
       <form
         onSubmit={(event) => {
           void handleSubmit(event);
@@ -88,7 +92,7 @@ function LoginForm(): React.JSX.Element | null {
           />
         </div>
 
-        {error !== null && <p className="text-sm text-red-600">{error}</p>}
+        {error !== null && <p className="text-sm text-danger">{error}</p>}
 
         <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? 'Signing in...' : 'Sign in'}
