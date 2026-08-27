@@ -221,11 +221,11 @@ pnpm db:up ; pnpm prisma:migrate ; pnpm db:seed ; pnpm test:e2e
 | Service         | URL                                      |
 | --------------- | ---------------------------------------- |
 | Web dashboard   | http://localhost:3000                    |
-| API base        | http://localhost:4000/api/v1             |
-| Swagger UI      | http://localhost:4000/api/docs           |
-| OpenAPI JSON    | http://localhost:4000/api/docs-json      |
-| Readiness probe | http://localhost:4000/api/v1/health      |
-| Liveness probe  | http://localhost:4000/api/v1/health/live |
+| API base        | https://inventory.boomerce.com//api/v1             |
+| Swagger UI      | https://inventory.boomerce.com//api/docs           |
+| OpenAPI JSON    | https://inventory.boomerce.com//api/docs-json      |
+| Readiness probe | https://inventory.boomerce.com//api/v1/health      |
+| Liveness probe  | https://inventory.boomerce.com//api/v1/health/live |
 
 Swagger is served everywhere except production; set `SWAGGER_ENABLED` to override.
 

@@ -1110,7 +1110,7 @@ JWT_REFRESH_EXPIRES_IN=7d
 
 WEB_URL=http://localhost:3000
 
-NEXT_PUBLIC_API_BASE_URL=http://localhost:4000/api/v1
+NEXT_PUBLIC_API_BASE_URL=https://inventory.boomerce.com//api/v1
 ```
 
 Validate required backend environment values on startup.
