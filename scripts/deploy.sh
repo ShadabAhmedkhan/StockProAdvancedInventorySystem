@@ -13,8 +13,11 @@
 #   4. Health-check, and fail loudly if the app does not come up.
 set -Eeuo pipefail
 
-APP_DIR=/var/www/stockpro
-SCHEMA="apps/api/prisma/schema.prisma"
+APP_DIR=/var/www/StockProAdvancedInventorySystem
+# Relative to apps/api, since `pnpm --filter @stock-pro/api exec` already runs
+# from that package's directory — prefixing "apps/api/" again here silently
+# resolves to a doubled, nonexistent path.
+SCHEMA="prisma/schema.prisma"
 API_HEALTH_URL="${API_HEALTH_URL:-http://127.0.0.1:4000/api/v1/health}"
 WEB_HEALTH_URL="${WEB_HEALTH_URL:-http://127.0.0.1:3002/login}"
 
