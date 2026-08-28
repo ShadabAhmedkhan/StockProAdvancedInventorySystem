@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -54,6 +55,7 @@ function ChangeStatusForm({
     setIsSubmitting(true);
     try {
       await onSubmit({ toStatus, note: note.trim() === '' ? undefined : note });
+      toast.success(`Repair moved to ${REPAIR_STATUS_LABELS[toStatus]}`);
       onClose();
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -102,7 +104,7 @@ function ChangeStatusForm({
         />
       </div>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

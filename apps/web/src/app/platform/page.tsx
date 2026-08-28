@@ -54,7 +54,7 @@ export default function PlatformAdminPage(): React.JSX.Element | null {
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-      {isError && <p className="text-sm text-red-600">{errorMessage(error)}</p>}
+      {isError && <p className="text-sm text-danger">{errorMessage(error)}</p>}
 
       <div className="space-y-2">
         {data?.map((organization) => (

@@ -67,7 +67,7 @@ export default function RepairDetailPage(): React.JSX.Element {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
   if (isError || repair === undefined) {
-    return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
+    return <p className="text-sm text-danger">{errorMessage(error)}</p>;
   }
 
   const isOpen = OPEN_REPAIR_STATUSES.includes(repair.status);
@@ -116,7 +116,7 @@ export default function RepairDetailPage(): React.JSX.Element {
         </div>
       </div>
 
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">

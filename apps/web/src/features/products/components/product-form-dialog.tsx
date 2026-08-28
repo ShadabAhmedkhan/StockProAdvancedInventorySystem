@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -69,6 +70,7 @@ function ProductForm({ product, categories, brands, onClose, onSubmit }: Product
     setIsSubmitting(true);
     try {
       await onSubmit(values);
+      toast.success(product === null ? 'Product created' : 'Product updated');
       onClose();
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -228,7 +230,7 @@ function ProductForm({ product, categories, brands, onClose, onSubmit }: Product
         Active in the catalogue
       </label>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -57,11 +58,14 @@ export default function OrderDetailPage(): React.JSX.Element {
     mutationFn: (input: { customerId?: string; discount?: string; tax?: string; notes?: string }) => ordersApi.update(orderId, input),
   });
 
-  async function runAction(action: () => Promise<unknown>): Promise<void> {
+  async function runAction(action: () => Promise<unknown>, successMessage?: string): Promise<void> {
     setActionError(null);
     try {
       await action();
       await invalidate();
+      if (successMessage !== undefined) {
+        toast.success(successMessage);
+      }
     } catch (submitError) {
       setActionError(errorMessage(submitError));
     }
@@ -71,7 +75,7 @@ export default function OrderDetailPage(): React.JSX.Element {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
   if (isError || order === undefined) {
-    return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
+    return <p className="text-sm text-danger">{errorMessage(error)}</p>;
   }
 
   const isDraft = order.status === 'DRAFT';
@@ -100,7 +104,7 @@ export default function OrderDetailPage(): React.JSX.Element {
               <Button
                 disabled={confirmMutation.isPending}
                 onClick={() => {
-                  void runAction(() => confirmMutation.mutateAsync());
+                  void runAction(() => confirmMutation.mutateAsync(), 'Order confirmed');
                 }}
               >
                 Confirm order
@@ -110,7 +114,7 @@ export default function OrderDetailPage(): React.JSX.Element {
               <Button
                 disabled={completeMutation.isPending}
                 onClick={() => {
-                  void runAction(() => completeMutation.mutateAsync());
+                  void runAction(() => completeMutation.mutateAsync(), 'Sale completed');
                 }}
               >
                 Complete sale
@@ -131,7 +135,7 @@ export default function OrderDetailPage(): React.JSX.Element {
                 variant="outline"
                 disabled={cancelMutation.isPending}
                 onClick={() => {
-                  void runAction(() => cancelMutation.mutateAsync());
+                  void runAction(() => cancelMutation.mutateAsync(), 'Order cancelled');
                 }}
               >
                 Cancel order
@@ -141,7 +145,7 @@ export default function OrderDetailPage(): React.JSX.Element {
         )}
       </div>
 
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">

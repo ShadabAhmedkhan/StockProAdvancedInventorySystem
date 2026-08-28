@@ -25,7 +25,7 @@ export function RecentStockMovements({ movements }: { movements: StockMovement[]
                       {STOCK_MOVEMENT_LABELS[movement.type]} &middot; {formatDateTime(movement.createdAt)}
                     </p>
                   </div>
-                  <span className={cn('shrink-0 tabular-nums', inbound ? 'text-emerald-600' : 'text-red-600')}>
+                  <span className={cn('shrink-0 tabular-nums', inbound ? 'text-success' : 'text-danger')}>
                     {inbound ? '+' : '-'}
                     {Math.abs(movement.quantity)}
                   </span>

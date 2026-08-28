@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { Select } from '@/components/ui/select';
 import { auditApi } from '@/features/audit/api';
 import { AUDIT_ACTION_LABELS, AUDIT_ENTITY_LABELS } from '@/features/audit/labels';
@@ -66,8 +67,8 @@ export default function AuditPage(): React.JSX.Element {
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

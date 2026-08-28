@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PNPM_VERSION: 10.34.5
+  NODE_VERSION: 22
+
+jobs:
+  lint-typecheck-build:
+    name: Lint, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Web unit tests
+        run: pnpm --filter @stock-pro/web test
+
+      - name: Build
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+
+  api-tests:
+    name: API unit + e2e tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: stockpro
+          POSTGRES_PASSWORD: stockpro
+          POSTGRES_DB: stockpro
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U stockpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://stockpro:stockpro@localhost:5433/stockpro?schema=public
+      JWT_ACCESS_SECRET: ci-access-secret-at-least-32-characters-long
+      JWT_REFRESH_SECRET: ci-refresh-secret-at-least-32-characters-long
+      PLATFORM_ADMIN_JWT_SECRET: ci-platform-admin-secret-at-least-32-chars
+      API_PORT: 4000
+      WEB_URL: http://localhost:3000
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations
+        run: pnpm --filter @stock-pro/api prisma:deploy
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Unit tests
+        run: pnpm --filter @stock-pro/api test
+
+      - name: E2E tests
+        run: pnpm --filter @stock-pro/api test:e2e
+
+  web-e2e:
+    name: Web e2e (Playwright)
+    runs-on: ubuntu-latest
+    needs: api-tests
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: stockpro
+          POSTGRES_PASSWORD: stockpro
+          POSTGRES_DB: stockpro
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U stockpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://stockpro:stockpro@localhost:5433/stockpro?schema=public
+      JWT_ACCESS_SECRET: ci-access-secret-at-least-32-characters-long
+      JWT_REFRESH_SECRET: ci-refresh-secret-at-least-32-characters-long
+      PLATFORM_ADMIN_JWT_SECRET: ci-platform-admin-secret-at-least-32-chars
+      API_PORT: 4001
+      WEB_URL: http://localhost:3100
+      NODE_ENV: test
+      NEXT_PUBLIC_API_URL: http://localhost:4001/api/v1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @stock-pro/web exec playwright install --with-deps chromium
+
+      - name: Apply migrations
+        run: pnpm --filter @stock-pro/api prisma:deploy
+
+      - name: Seed database
+        run: pnpm db:seed
+
+      - name: Build API
+        run: pnpm --filter @stock-pro/api build
+
+      - name: Start API
+        run: pnpm --filter @stock-pro/api start &
+
+      - name: Wait for API
+        run: npx wait-on http://localhost:4001/api/v1/health/live --timeout 60000
+
+      - name: Run Playwright e2e
+        run: pnpm --filter @stock-pro/web test:e2e

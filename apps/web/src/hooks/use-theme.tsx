@@ -27,16 +27,26 @@ function systemPrefersDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
+function readStoredTheme(): Theme {
+  if (typeof window === 'undefined') {
+    return 'system';
+  }
+  const stored = window.localStorage.getItem(STORAGE_KEY) as Theme | null;
+  return stored ?? 'system';
+}
+
+function initialResolvedTheme(theme: Theme): 'light' | 'dark' {
+  if (typeof window === 'undefined') {
+    return 'light';
+  }
+  return theme === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : theme;
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const [theme, setThemeState] = useState<Theme>('system');
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setThemeState] = useState<Theme>(readStoredTheme);
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => initialResolvedTheme(readStoredTheme()));
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY) as Theme | null;
-    const initial = stored ?? 'system';
-    setThemeState(initial);
-    setResolvedTheme(initial === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : initial);
-
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (): void => {
       setThemeState((current) => {
@@ -47,7 +57,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
       });
     };
     media.addEventListener('change', onChange);
-    return () => media.removeEventListener('change', onChange);
+    return () => {
+      media.removeEventListener('change', onChange);
+    };
   }, []);
 
   const setTheme = useCallback((next: Theme) => {

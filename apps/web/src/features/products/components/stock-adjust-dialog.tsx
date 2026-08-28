@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -55,6 +56,7 @@ function StockAdjustForm({ stockLevel, onClose, onSubmit }: StockAdjustFormProps
     setIsSubmitting(true);
     try {
       await onSubmit({ productId: stockLevel.productId, type, quantity, note: note.trim() === '' ? undefined : note });
+      toast.success('Stock adjusted');
       onClose();
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -120,7 +122,7 @@ function StockAdjustForm({ stockLevel, onClose, onSubmit }: StockAdjustFormProps
         />
       </div>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

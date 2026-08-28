@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -56,8 +57,10 @@ function ExpenseForm({
       const input = { category, description, amount, expenseDate: expenseDate === '' ? undefined : expenseDate };
       if (editingExpense === null) {
         await onCreate(input);
+        toast.success('Expense recorded');
       } else {
         await onUpdate(editingExpense.id, input);
+        toast.success('Expense updated');
       }
       onClose();
     } catch (submitError) {
@@ -130,7 +133,7 @@ function ExpenseForm({
         </div>
       </div>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

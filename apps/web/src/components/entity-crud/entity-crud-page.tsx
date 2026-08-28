@@ -2,11 +2,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/error-message';
 import { formatDateTime } from '@/lib/format';
@@ -79,10 +81,20 @@ export function EntityCrudPage<T extends EntityBase>({
 
   const invalidate = (): Promise<void> => queryClient.invalidateQueries({ queryKey: [queryKey] });
 
+  const singular = title.replace(/s$/, '');
+
   const createMutation = useMutation({ mutationFn: (input: Record<string, string>) => api.create(input) });
   const updateMutation = useMutation({ mutationFn: ({ id, input }: { id: string; input: Record<string, string> }) => api.update(id, input) });
-  const removeMutation = useMutation({ mutationFn: (id: string) => api.remove(id) });
-  const restoreMutation = useMutation({ mutationFn: (id: string) => api.restore(id) });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => api.remove(id),
+    onSuccess: () => toast.success(`${singular} deleted`),
+    onError: (mutationError) => toast.error(errorMessage(mutationError)),
+  });
+  const restoreMutation = useMutation({
+    mutationFn: (id: string) => api.restore(id),
+    onSuccess: () => toast.success(`${singular} restored`),
+    onError: (mutationError) => toast.error(errorMessage(mutationError)),
+  });
 
   function openCreate(): void {
     setEditingItem(null);
@@ -104,8 +116,10 @@ export function EntityCrudPage<T extends EntityBase>({
     try {
       if (editingItem === null) {
         await createMutation.mutateAsync(values);
+        toast.success(`${singular} created`);
       } else {
         await updateMutation.mutateAsync({ id: editingItem.id, input: values });
+        toast.success(`${singular} updated`);
       }
       await invalidate();
       setDialogOpen(false);
@@ -160,8 +174,8 @@ export function EntityCrudPage<T extends EntityBase>({
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -194,7 +208,11 @@ export function EntityCrudPage<T extends EntityBase>({
                       ))}
                       <td className="p-3 text-muted-foreground">{formatDateTime(item.updatedAt)}</td>
                       <td className="p-3">
-                        {item.deletedAt === null ? <span className="text-emerald-600">Active</span> : <span className="text-muted-foreground">Deleted</span>}
+                        {item.deletedAt === null ? (
+                          <span className="inline-flex items-center rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">Active</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">Deleted</span>
+                        )}
                       </td>
                       {(canWrite || canDelete) && (
                         <td className="p-3 text-right">
@@ -267,7 +285,7 @@ export function EntityCrudPage<T extends EntityBase>({
         onClose={() => {
           setDialogOpen(false);
         }}
-        title={editingItem === null ? `New ${title.replace(/s$/, '')}` : `Edit ${title.replace(/s$/, '')}`}
+        title={editingItem === null ? `New ${singular}` : `Edit ${singular}`}
       >
         <form
           onSubmit={(event) => {
@@ -306,7 +324,7 @@ export function EntityCrudPage<T extends EntityBase>({
             </div>
           ))}
 
-          {formError !== null && <p className="text-sm text-red-600">{formError}</p>}
+          {formError !== null && <p className="text-sm text-danger">{formError}</p>}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button

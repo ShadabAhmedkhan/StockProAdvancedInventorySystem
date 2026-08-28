@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { Input } from '@/components/ui/input';
 import { financeApi, type CreateExpenseInput, type CreateOtherIncomeInput, type UpdateExpenseInput } from '@/features/finance/api';
 import { ExpenseFormDialog } from '@/features/finance/components/expense-form-dialog';
@@ -93,7 +94,7 @@ function SummaryTab({ from, to }: { from: string; to: string }): React.JSX.Eleme
   });
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading...</p>;
-  if (isError || data === undefined) return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
+  if (isError || data === undefined) return <p className="text-sm text-danger">{errorMessage(error)}</p>;
 
   const categoryEntries = Object.entries(data.expenses.byCategory) as [keyof typeof EXPENSE_CATEGORY_LABELS, string][];
 
@@ -206,8 +207,8 @@ function ExpensesTab({ canManage }: { canManage: boolean }): React.JSX.Element {
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -332,8 +333,8 @@ function PaymentsTab(): React.JSX.Element {
     <div className="space-y-4">
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -453,8 +454,8 @@ function TransactionsTab({ canManage }: { canManage: boolean }): React.JSX.Eleme
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

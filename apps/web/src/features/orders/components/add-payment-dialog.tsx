@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -53,6 +54,7 @@ function PaymentForm({
     setIsSubmitting(true);
     try {
       await onSubmit({ method, amount, reference: reference.trim() === '' ? undefined : reference, note: note.trim() === '' ? undefined : note });
+      toast.success('Payment recorded');
       onClose();
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -123,7 +125,7 @@ function PaymentForm({
         />
       </div>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

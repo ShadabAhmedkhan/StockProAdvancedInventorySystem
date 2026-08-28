@@ -2,10 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { brandsApi, categoriesApi, productsApi } from '@/features/products/api';
 import { ProductFormDialog } from '@/features/products/components/product-form-dialog';
 import { StockStatusBadge } from '@/features/products/components/stock-status-badge';
@@ -62,6 +64,7 @@ export default function ProductsPage(): React.JSX.Element {
     try {
       await removeMutation.mutateAsync(id);
       await invalidate();
+      toast.success('Product deleted');
     } catch (error) {
       setActionError(errorMessage(error));
     }
@@ -72,6 +75,7 @@ export default function ProductsPage(): React.JSX.Element {
     try {
       await restoreMutation.mutateAsync(id);
       await invalidate();
+      toast.success('Product restored');
     } catch (error) {
       setActionError(errorMessage(error));
     }
@@ -151,12 +155,12 @@ export default function ProductsPage(): React.JSX.Element {
         </label>
       </div>
 
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <Card>
         <CardContent className="p-0">
-          {productsQuery.isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {productsQuery.isError && <p className="p-4 text-sm text-red-600">{errorMessage(productsQuery.error)}</p>}
+          {productsQuery.isLoading && <TableSkeleton />}
+          {productsQuery.isError && <p className="p-4 text-sm text-danger">{errorMessage(productsQuery.error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

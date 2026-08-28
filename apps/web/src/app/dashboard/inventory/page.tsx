@@ -1,10 +1,13 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Boxes, DollarSign, Package } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { cn } from '@/lib/utils';
 import { stockApi } from '@/features/products/api';
 import { StockAdjustDialog } from '@/features/products/components/stock-adjust-dialog';
@@ -77,26 +80,66 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-function SummaryStrip(): React.JSX.Element | null {
-  const { data } = useQuery({ queryKey: ['stock-summary'], queryFn: stockApi.summary });
-  if (data === undefined) {
-    return null;
+function SummaryStrip(): React.JSX.Element {
+  const { data, isLoading } = useQuery({ queryKey: ['stock-summary'], queryFn: stockApi.summary });
+
+  if (isLoading || data === undefined) {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Card key={i} className="p-4">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="mt-2 h-6 w-16" />
+          </Card>
+        ))}
+      </div>
+    );
   }
+
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <SummaryCard label="Products" value={String(data.totalProducts)} />
-      <SummaryCard label="Units on hand" value={String(data.totalUnits)} />
-      <SummaryCard label="Value at retail" value={formatCurrency(data.inventoryValueAtRetail)} />
-      <SummaryCard label="Alerts" value={String(data.lowStockCount + data.outOfStockCount)} hint={`${String(data.outOfStockCount)} out of stock`} />
+      <SummaryCard label="Products" value={String(data.totalProducts)} icon={Package} />
+      <SummaryCard label="Units on hand" value={String(data.totalUnits)} icon={Boxes} />
+      <SummaryCard label="Value at retail" value={formatCurrency(data.inventoryValueAtRetail)} icon={DollarSign} />
+      <SummaryCard
+        label="Alerts"
+        value={String(data.lowStockCount + data.outOfStockCount)}
+        hint={`${String(data.outOfStockCount)} out of stock`}
+        icon={AlertTriangle}
+        tone={data.outOfStockCount > 0 ? 'danger' : 'warning'}
+      />
     </div>
   );
 }
 
-function SummaryCard({ label, value, hint }: { label: string; value: string; hint?: string }): React.JSX.Element {
+const TONE_STYLES = {
+  default: 'bg-primary/10 text-primary',
+  warning: 'bg-warning/20 text-warning',
+  danger: 'bg-danger/15 text-danger',
+} as const;
+
+function SummaryCard({
+  label,
+  value,
+  hint,
+  icon: Icon,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tone?: keyof typeof TONE_STYLES;
+}): React.JSX.Element {
   return (
     <Card>
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
+      <CardHeader>
+        <CardTitle>{label}</CardTitle>
+        <span className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-md', TONE_STYLES[tone])}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      </CardHeader>
+      <CardContent>
         <p className="text-lg font-semibold tabular-nums">{value}</p>
         {hint !== undefined && <p className="text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
@@ -160,8 +203,8 @@ function StockLevelsTab({ canAdjust }: { canAdjust: boolean }): React.JSX.Elemen
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -275,8 +318,8 @@ function MovementsTab(): React.JSX.Element {
     <div className="space-y-4">
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -309,7 +352,7 @@ function MovementsTab(): React.JSX.Element {
                           <span className="ml-1 font-mono text-xs text-muted-foreground">{movement.product.sku}</span>
                         </td>
                         <td className="p-3 text-muted-foreground">{STOCK_MOVEMENT_LABELS[movement.type]}</td>
-                        <td className={cn('p-3 text-right tabular-nums', inbound ? 'text-emerald-600' : 'text-red-600')}>
+                        <td className={cn('p-3 text-right tabular-nums', inbound ? 'text-success' : 'text-danger')}>
                           {inbound ? '+' : '-'}
                           {movement.quantity}
                         </td>

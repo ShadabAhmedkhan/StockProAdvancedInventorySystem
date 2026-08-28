@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -57,8 +58,10 @@ function UserForm({
     try {
       if (editingUser === null) {
         await onCreate({ firstName, lastName, email, password, role, status });
+        toast.success('User created');
       } else {
         await onUpdate(editingUser.id, { firstName, lastName, email });
+        toast.success('User updated');
       }
       onClose();
     } catch (submitError) {
@@ -167,7 +170,7 @@ function UserForm({
         </div>
       )}
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

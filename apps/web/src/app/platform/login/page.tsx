@@ -73,7 +73,7 @@ export default function PlatformAdminLoginPage(): React.JSX.Element {
           />
         </div>
 
-        {error !== null && <p className="text-sm text-red-600">{error}</p>}
+        {error !== null && <p className="text-sm text-danger">{error}</p>}
 
         <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? 'Signing in...' : 'Sign in'}

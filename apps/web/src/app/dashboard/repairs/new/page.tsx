@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -65,6 +66,7 @@ export default function RepairIntakePage(): React.JSX.Element {
         notes: notes.trim() === '' ? undefined : notes,
       };
       const repair = await repairsApi.create(input);
+      toast.success('Repair intake recorded');
       router.push(`/dashboard/repairs/${repair.id}`);
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -247,7 +249,7 @@ export default function RepairIntakePage(): React.JSX.Element {
               />
             </div>
 
-            {error !== null && <p className="text-sm text-red-600">{error}</p>}
+            {error !== null && <p className="text-sm text-danger">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button

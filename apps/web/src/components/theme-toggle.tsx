@@ -21,7 +21,9 @@ export function ThemeToggle(): React.JSX.Element {
           type="button"
           aria-label={label}
           aria-pressed={theme === value}
-          onClick={() => setTheme(value)}
+          onClick={() => {
+            setTheme(value);
+          }}
           className={cn(
             'flex h-7 w-7 items-center justify-center rounded-full transition-colors',
             theme === value ? 'bg-surface text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',

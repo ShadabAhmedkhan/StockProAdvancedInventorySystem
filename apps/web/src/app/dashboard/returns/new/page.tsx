@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -73,6 +74,7 @@ export default function NewReturnPage(): React.JSX.Element {
     setIsSubmitting(true);
     try {
       const created = await returnsApi.create({ orderId: order.id, reason, reasonNote: reasonNote.trim() === '' ? undefined : reasonNote, items });
+      toast.success('Return created');
       router.push(`/dashboard/returns/${created.id}`);
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -212,7 +214,7 @@ export default function NewReturnPage(): React.JSX.Element {
               />
             </div>
 
-            {error !== null && <p className="text-sm text-red-600">{error}</p>}
+            {error !== null && <p className="text-sm text-danger">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button

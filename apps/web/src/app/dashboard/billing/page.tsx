@@ -83,12 +83,12 @@ function BillingContent(): React.JSX.Element {
       </div>
 
       {checkoutResult === 'cancelled' && <p className="text-sm text-muted-foreground">Checkout was cancelled - nothing was charged.</p>}
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <Card>
         <CardContent className="space-y-4 p-4">
           {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="text-sm text-red-600">{errorMessage(error)}</p>}
+          {isError && <p className="text-sm text-danger">{errorMessage(error)}</p>}
 
           {data !== undefined && (
             <>
@@ -105,7 +105,7 @@ function BillingContent(): React.JSX.Element {
               </div>
 
               {(data.subscriptionStatus === 'PAST_DUE' || data.subscriptionStatus === 'CANCELED') && (
-                <p className="text-sm text-red-600">
+                <p className="text-sm text-danger">
                   {data.subscriptionStatus === 'PAST_DUE' ? 'Your last payment failed - update your payment method to keep access.' : 'Your subscription has ended.'}
                 </p>
               )}

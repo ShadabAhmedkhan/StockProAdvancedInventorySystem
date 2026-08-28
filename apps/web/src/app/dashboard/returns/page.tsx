@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { Select } from '@/components/ui/select';
 import { returnsApi } from '@/features/returns/api';
 import { ReturnStatusBadge } from '@/features/returns/components/return-status-badge';
@@ -86,8 +87,8 @@ export default function ReturnsPage(): React.JSX.Element {
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -50,6 +51,7 @@ function SettingForm({
     setIsSubmitting(true);
     try {
       await onSubmit(key, { value, valueType, description: description.trim() === '' ? undefined : description });
+      toast.success('Setting saved');
       onClose();
     } catch (submitError) {
       setError(errorMessage(submitError));
@@ -120,7 +122,7 @@ function SettingForm({
         />
       </div>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

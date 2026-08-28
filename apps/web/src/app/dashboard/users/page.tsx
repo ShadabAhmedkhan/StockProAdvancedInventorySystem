@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { usersApi, type CreateUserInput, type UpdateUserInput } from '@/features/users/api';
@@ -127,12 +128,12 @@ export default function UsersPage(): React.JSX.Element {
         </Select>
       </div>
 
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <Card>
         <CardContent className="p-0">
-          {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-          {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+          {isLoading && <TableSkeleton />}
+          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
           {data !== undefined && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

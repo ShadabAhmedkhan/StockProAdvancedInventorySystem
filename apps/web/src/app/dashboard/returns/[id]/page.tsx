@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,17 +73,20 @@ export default function ReturnDetailPage(): React.JSX.Element {
   const approveMutation = useMutation({ mutationFn: () => returnsApi.approve(id), onSuccess: invalidate });
   const rejectMutation = useMutation({ mutationFn: () => returnsApi.reject(id), onSuccess: invalidate });
 
-  async function runAction(action: () => Promise<unknown>): Promise<void> {
+  async function runAction(action: () => Promise<unknown>, successMessage?: string): Promise<void> {
     setActionError(null);
     try {
       await action();
+      if (successMessage !== undefined) {
+        toast.success(successMessage);
+      }
     } catch (actionErr) {
       setActionError(errorMessage(actionErr));
     }
   }
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading...</p>;
-  if (isError || returnRecord === undefined) return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
+  if (isError || returnRecord === undefined) return <p className="text-sm text-danger">{errorMessage(error)}</p>;
 
   const isPending = returnRecord.status === 'PENDING';
   const returnedOrderItemIds = new Set(returnRecord.items.map((item) => item.orderItemId));
@@ -107,7 +111,7 @@ export default function ReturnDetailPage(): React.JSX.Element {
               <Button
                 variant="outline"
                 onClick={() => {
-                  void runAction(() => rejectMutation.mutateAsync());
+                  void runAction(() => rejectMutation.mutateAsync(), 'Return rejected');
                 }}
                 disabled={rejectMutation.isPending}
               >
@@ -115,7 +119,7 @@ export default function ReturnDetailPage(): React.JSX.Element {
               </Button>
               <Button
                 onClick={() => {
-                  void runAction(() => approveMutation.mutateAsync());
+                  void runAction(() => approveMutation.mutateAsync(), 'Return approved');
                 }}
                 disabled={approveMutation.isPending}
               >
@@ -135,7 +139,7 @@ export default function ReturnDetailPage(): React.JSX.Element {
         </div>
       </div>
 
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
@@ -332,6 +336,7 @@ function CompleteReturnForm({ returnId, onClose, onCompleted }: { returnId: stri
     setIsSubmitting(true);
     try {
       await returnsApi.complete(returnId, { method, reference: reference.trim() === '' ? undefined : reference, note: note.trim() === '' ? undefined : note });
+      toast.success('Return completed');
       onCompleted();
       onClose();
     } catch (submitError) {
@@ -391,7 +396,7 @@ function CompleteReturnForm({ returnId, onClose, onCompleted }: { returnId: stri
         />
       </div>
 
-      {error !== null && <p className="text-sm text-red-600">{error}</p>}
+      {error !== null && <p className="text-sm text-danger">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="outline" onClick={onClose}>

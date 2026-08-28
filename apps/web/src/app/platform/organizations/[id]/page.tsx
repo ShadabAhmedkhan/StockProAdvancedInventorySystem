@@ -98,13 +98,13 @@ export default function PlatformAdminOrganizationPage(): React.JSX.Element | nul
         </div>
       )}
 
-      {actionError !== null && <p className="text-sm text-red-600">{actionError}</p>}
+      {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
       <Card>
         <CardContent className="space-y-2 p-4">
           <h2 className="text-sm font-medium text-muted-foreground">Users</h2>
           {usersQuery.isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-          {usersQuery.isError && <p className="text-sm text-red-600">{errorMessage(usersQuery.error)}</p>}
+          {usersQuery.isError && <p className="text-sm text-danger">{errorMessage(usersQuery.error)}</p>}
           {usersQuery.data?.map((user) => (
             <div key={user.id} className="flex items-center justify-between border-t border-border py-2 first:border-t-0">
               <div>

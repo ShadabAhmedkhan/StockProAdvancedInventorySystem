@@ -123,7 +123,7 @@ export default function RegisterPage(): React.JSX.Element | null {
           <p className="text-xs text-muted-foreground">At least 10 characters, with an upper-case letter, a lower-case letter and a digit.</p>
         </div>
 
-        {error !== null && <p className="text-sm text-red-600">{error}</p>}
+        {error !== null && <p className="text-sm text-danger">{error}</p>}
 
         <Button type="submit" disabled={isSubmitting} className="w-full">
           {isSubmitting ? 'Creating account...' : 'Create account'}

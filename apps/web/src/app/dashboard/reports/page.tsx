@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { PdfDownloadButton } from '@/components/pdf-download-button';
 import { Select } from '@/components/ui/select';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { reportsApi } from '@/features/reports/api';
 import type { SalesReportPeriod } from '@/features/reports/types';
 import { cn } from '@/lib/utils';
@@ -141,7 +142,7 @@ function SalesTab({ from, to }: { from: string; to: string }): React.JSX.Element
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-      {isError && <p className="text-sm text-red-600">{errorMessage(error)}</p>}
+      {isError && <p className="text-sm text-danger">{errorMessage(error)}</p>}
 
       {data !== undefined && (
         <>
@@ -199,7 +200,7 @@ function InventoryTab(): React.JSX.Element {
   const { data, isLoading, isError, error } = useQuery({ queryKey: ['reports-inventory'], queryFn: reportsApi.inventory });
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading...</p>;
-  if (isError || data === undefined) return <p className="text-sm text-red-600">{errorMessage(error)}</p>;
+  if (isError || data === undefined) return <p className="text-sm text-danger">{errorMessage(error)}</p>;
 
   function handleDownload(): void {
     if (data === undefined) return;
@@ -325,8 +326,8 @@ function TopProductsTab({ from, to }: { from: string; to: string }): React.JSX.E
         <PdfDownloadButton onDownload={handleDownload} disabled={data === undefined} />
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading && <p className="p-4 text-sm text-muted-foreground">Loading...</p>}
-        {isError && <p className="p-4 text-sm text-red-600">{errorMessage(error)}</p>}
+        {isLoading && <TableSkeleton />}
+        {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
         {data !== undefined && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
