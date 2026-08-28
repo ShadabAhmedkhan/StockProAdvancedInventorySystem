@@ -111,6 +111,13 @@ export class ProductsService {
           sellingPrice: dto.sellingPrice,
           minimumStock: dto.minimumStock,
           isActive: dto.isActive,
+          trackingType: dto.trackingType,
+          model: dto.model ?? null,
+          variant: dto.variant ?? null,
+          color: dto.color ?? null,
+          storage: dto.storage ?? null,
+          condition: dto.condition,
+          warrantyMonths: dto.warrantyMonths ?? null,
         },
         select: { id: true },
       });
@@ -156,6 +163,13 @@ export class ProductsService {
       ...(dto.sellingPrice === undefined ? {} : { sellingPrice: dto.sellingPrice }),
       ...(dto.minimumStock === undefined ? {} : { minimumStock: dto.minimumStock }),
       ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
+      ...(dto.trackingType === undefined ? {} : { trackingType: dto.trackingType }),
+      ...(dto.model === undefined ? {} : { model: dto.model }),
+      ...(dto.variant === undefined ? {} : { variant: dto.variant }),
+      ...(dto.color === undefined ? {} : { color: dto.color }),
+      ...(dto.storage === undefined ? {} : { storage: dto.storage }),
+      ...(dto.condition === undefined ? {} : { condition: dto.condition }),
+      ...(dto.warrantyMonths === undefined ? {} : { warrantyMonths: dto.warrantyMonths }),
     };
 
     await this.prisma.product.update({ where: { id }, data });

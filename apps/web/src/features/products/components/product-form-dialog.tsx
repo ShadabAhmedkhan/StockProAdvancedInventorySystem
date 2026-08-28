@@ -23,7 +23,25 @@ interface ProductFormDialogProps {
 
 function defaultValues(product: Product | null): ProductInput {
   if (product === null) {
-    return { sku: '', barcode: '', name: '', description: '', categoryId: '', brandId: '', costPrice: '', sellingPrice: '', minimumStock: 0, isActive: true };
+    return {
+      sku: '',
+      barcode: '',
+      name: '',
+      description: '',
+      categoryId: '',
+      brandId: '',
+      costPrice: '',
+      sellingPrice: '',
+      minimumStock: 0,
+      isActive: true,
+      trackingType: 'NONE',
+      model: '',
+      variant: '',
+      color: '',
+      storage: '',
+      condition: 'NEW',
+      warrantyMonths: undefined,
+    };
   }
   return {
     sku: product.sku,
@@ -36,6 +54,13 @@ function defaultValues(product: Product | null): ProductInput {
     sellingPrice: product.sellingPrice,
     minimumStock: product.minimumStock,
     isActive: product.isActive,
+    trackingType: product.trackingType,
+    model: product.model ?? '',
+    variant: product.variant ?? '',
+    color: product.color ?? '',
+    storage: product.storage ?? '',
+    condition: product.condition,
+    warrantyMonths: product.warrantyMonths ?? undefined,
   };
 }
 
@@ -214,6 +239,95 @@ function ProductForm({ product, categories, brands, onClose, onSubmit }: Product
             value={values.minimumStock}
             onChange={(event) => {
               set('minimumStock', Number(event.target.value));
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="model">Model</Label>
+          <Input
+            id="model"
+            value={values.model}
+            onChange={(event) => {
+              set('model', event.target.value);
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="variant">Variant</Label>
+          <Input
+            id="variant"
+            value={values.variant}
+            onChange={(event) => {
+              set('variant', event.target.value);
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="color">Color</Label>
+          <Input
+            id="color"
+            value={values.color}
+            onChange={(event) => {
+              set('color', event.target.value);
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="storage">Storage</Label>
+          <Input
+            id="storage"
+            value={values.storage}
+            onChange={(event) => {
+              set('storage', event.target.value);
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="condition">Condition</Label>
+          <Select
+            id="condition"
+            value={values.condition}
+            onChange={(event) => {
+              set('condition', event.target.value as ProductInput['condition']);
+            }}
+          >
+            <option value="NEW">New</option>
+            <option value="USED">Used</option>
+            <option value="REFURBISHED">Refurbished</option>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="trackingType">Unit tracking</Label>
+          <Select
+            id="trackingType"
+            value={values.trackingType}
+            onChange={(event) => {
+              set('trackingType', event.target.value as ProductInput['trackingType']);
+            }}
+          >
+            <option value="NONE">None</option>
+            <option value="SERIAL">Serial number</option>
+            <option value="IMEI">IMEI</option>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="warrantyMonths">Warranty (months)</Label>
+          <Input
+            id="warrantyMonths"
+            type="number"
+            min={0}
+            value={values.warrantyMonths ?? ''}
+            onChange={(event) => {
+              set('warrantyMonths', event.target.value === '' ? undefined : Number(event.target.value));
             }}
           />
         </div>

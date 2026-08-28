@@ -19,3 +19,17 @@ export function stockStatusFor(quantity: number, minimumStock: number): StockSta
   }
   return quantity <= minimumStock ? 'LOW' : 'OK';
 }
+
+export const PRODUCT_UNIT_STATUS_LABELS: Record<string, string> = {
+  IN_STOCK: 'In stock',
+  SOLD: 'Sold',
+  RETURNED: 'Returned',
+  DAMAGED: 'Damaged',
+};
+
+export const PRODUCT_UNIT_STATUS_CLASSES: Record<string, string> = {
+  IN_STOCK: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  SOLD: 'bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300',
+  RETURNED: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+  DAMAGED: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
+};

@@ -202,6 +202,33 @@ enum AuditEntity {
   PURCHASE_ORDER
   GOODS_RECEIPT
   STOCK_TRANSFER
+  PRODUCT_UNIT
+}
+
+/// A product's unit-level identity tracking strategy. NONE is the default
+/// for goods sold in bulk (cables, accessories); SERIAL/IMEI apply to
+/// products where each physical unit is individually identifiable (phones,
+/// laptops). Never forced onto every product - see Product.trackingType.
+enum ProductTrackingType {
+  NONE
+  SERIAL
+  IMEI
+}
+
+enum ProductCondition {
+  NEW
+  USED
+  REFURBISHED
+}
+
+/// Lifecycle of one serialised/IMEI-tracked unit. Phase 34 scope: a registry
+/// with uniqueness and scan lookup - status is set directly by staff, not
+/// wired into the order/repair/return reservation pipeline.
+enum ProductUnitStatus {
+  IN_STOCK
+  SOLD
+  RETURNED
+  DAMAGED
 }
 
 enum PurchaseOrderStatus {
@@ -285,6 +312,7 @@ model Organization {
   goodsReceipts         GoodsReceipt[]
   locations             Location[]
   stockTransfers        StockTransfer[]
+  productUnits          ProductUnit[]
 
   @@index([subscriptionStatus])
 }
@@ -491,6 +519,13 @@ model Product {
   sellingPrice   Decimal   @db.Decimal(14, 2)
   minimumStock   Int       @default(0)
   isActive       Boolean   @default(true)
+  trackingType   ProductTrackingType @default(NONE)
+  model          String?   @db.VarChar(120)
+  variant        String?   @db.VarChar(120)
+  color          String?   @db.VarChar(60)
+  storage        String?   @db.VarChar(60)
+  condition      ProductCondition @default(NEW)
+  warrantyMonths Int?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
@@ -508,6 +543,7 @@ model Product {
   repairItems    RepairItem[]
   purchaseOrderItems PurchaseOrderItem[]
   stockTransferItems StockTransferItem[]
+  units              ProductUnit[]
 
   @@unique([organizationId, sku])
   @@unique([organizationId, barcode])
@@ -551,6 +587,7 @@ model Location {
   userAccess     UserLocationAccess[]
   transfersFrom  StockTransfer[]      @relation("StockTransferSource")
   transfersTo    StockTransfer[]      @relation("StockTransferDestination")
+  productUnits   ProductUnit[]
 
   @@index([organizationId])
   @@index([deletedAt])
@@ -635,6 +672,31 @@ model StockMovement {
   @@index([referenceType, referenceId])
   @@index([createdById])
   @@index([createdAt])
+  @@index([locationId])
+}
+
+/// One row per physically serialised/IMEI unit, for products whose
+/// trackingType is SERIAL or IMEI (see Product.trackingType). Independent of
+/// Inventory's aggregate quantity - Phase 34 scope is a registry with
+/// uniqueness and scan lookup, not unit-level reservation/fulfillment.
+model ProductUnit {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  organizationId String            @db.Uuid
+  productId      String            @db.Uuid
+  locationId     String            @db.Uuid
+  serialNumber   String            @db.VarChar(64)
+  status         ProductUnitStatus @default(IN_STOCK)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // Restrict: a location holding tracked units cannot be deleted out from under them.
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, serialNumber])
+  @@index([productId])
+  @@index([status])
   @@index([locationId])
 }
 

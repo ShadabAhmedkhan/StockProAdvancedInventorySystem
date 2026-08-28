@@ -26,6 +26,7 @@ import { OrdersModule } from './orders/orders.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { ProductUnitsModule } from './product-units/product-units.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { RepairsModule } from './repairs/repairs.module';
 import { ReportsModule } from './reports/reports.module';
@@ -65,6 +66,7 @@ import { UsersModule } from './users/users.module';
     CategoriesModule,
     BrandsModule,
     ProductsModule,
+    ProductUnitsModule,
     LocationsModule,
     StockModule,
     OrdersModule,

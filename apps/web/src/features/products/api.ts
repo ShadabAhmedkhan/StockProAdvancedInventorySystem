@@ -1,5 +1,17 @@
 import { apiClient, type PaginatedResult } from '@/lib/api-client';
-import type { Brand, Category, Product, StockAdjustmentResult, StockLevel, StockMovement, StockSummary } from './types';
+import type {
+  Brand,
+  Category,
+  Product,
+  ProductCondition,
+  ProductTrackingType,
+  ProductUnit,
+  ProductUnitStatus,
+  StockAdjustmentResult,
+  StockLevel,
+  StockMovement,
+  StockSummary,
+} from './types';
 
 function query(params: Record<string, string | number | boolean | undefined>): string {
   const search = new URLSearchParams();
@@ -36,6 +48,13 @@ export interface ProductInput {
   sellingPrice: string;
   minimumStock: number;
   isActive: boolean;
+  trackingType?: ProductTrackingType;
+  model?: string;
+  variant?: string;
+  color?: string;
+  storage?: string;
+  condition?: ProductCondition;
+  warrantyMonths?: number;
 }
 
 /** Omits keys the API rejects on an optional field when empty (`@IsOptional` still validates a present empty string). */
@@ -77,6 +96,25 @@ export interface StockAdjustInput {
   quantity: number;
   note?: string;
 }
+
+export interface ProductUnitListParams {
+  page: number;
+  search: string;
+  productId?: string;
+  status?: ProductUnitStatus;
+}
+
+export const productUnitsApi = {
+  list: ({ page, search, productId, status }: ProductUnitListParams): Promise<PaginatedResult<ProductUnit>> =>
+    apiClient.getPaginated<ProductUnit>(`/product-units${query({ page, limit: 20, search, productId, status })}`),
+  scan: (serialNumber: string): Promise<ProductUnit> => apiClient.get<ProductUnit>(`/product-units/scan/${encodeURIComponent(serialNumber)}`),
+  create: (input: { productId: string; locationId?: string; serialNumber: string }): Promise<ProductUnit> =>
+    apiClient.post<ProductUnit>('/product-units', input),
+  updateStatus: (id: string, status: ProductUnitStatus): Promise<ProductUnit> => apiClient.patch<ProductUnit>(`/product-units/${id}/status`, { status }),
+  remove: async (id: string): Promise<void> => {
+    await apiClient.delete(`/product-units/${id}`);
+  },
+};
 
 export const stockApi = {
   summary: (): Promise<StockSummary> => apiClient.get<StockSummary>('/stock/summary'),

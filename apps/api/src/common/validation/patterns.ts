@@ -48,3 +48,9 @@ export const MONEY_PATTERN = /^\d{1,12}(?:\.\d{1,2})?$/;
  * validation message naming the field.
  */
 export const POSITIVE_MONEY_PATTERN = /^(?!0+(?:\.0{1,2})?$)\d{1,12}(?:\.\d{1,2})?$/;
+
+/** A serial number: alphanumeric with hyphens, the same shape as a barcode. */
+export const SERIAL_NUMBER_PATTERN = /^[A-Za-z0-9-]{4,64}$/;
+
+/** An IMEI is always exactly 15 digits (TAC + FAC + SNR + Luhn check digit). */
+export const IMEI_PATTERN = /^\d{15}$/;

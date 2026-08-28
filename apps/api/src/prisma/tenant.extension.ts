@@ -30,6 +30,7 @@ const TENANT_MODELS = new Set([
   'PurchaseOrder',
   'GoodsReceipt',
   'Location',
+  'ProductUnit',
 ]);
 
 const READ_OR_MUTATE_BY_WHERE = new Set([

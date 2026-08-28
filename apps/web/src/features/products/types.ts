@@ -17,6 +17,9 @@ export interface Brand {
   deletedAt: string | null;
 }
 
+export type ProductTrackingType = 'NONE' | 'SERIAL' | 'IMEI';
+export type ProductCondition = 'NEW' | 'USED' | 'REFURBISHED';
+
 export interface Product {
   id: string;
   sku: string;
@@ -30,12 +33,33 @@ export interface Product {
   sellingPrice: string;
   minimumStock: number;
   isActive: boolean;
+  trackingType: ProductTrackingType;
+  model: string | null;
+  variant: string | null;
+  color: string | null;
+  storage: string | null;
+  condition: ProductCondition;
+  warrantyMonths: number | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
   category: { id: string; name: string; slug: string };
   brand: { id: string; name: string; slug: string } | null;
   inventory: { quantity: number; reservedQuantity: number; updatedAt: string } | null;
+}
+
+export type ProductUnitStatus = 'IN_STOCK' | 'SOLD' | 'RETURNED' | 'DAMAGED';
+
+export interface ProductUnit {
+  id: string;
+  productId: string;
+  locationId: string;
+  serialNumber: string;
+  status: ProductUnitStatus;
+  createdAt: string;
+  updatedAt: string;
+  product: { id: string; sku: string; name: string; trackingType: ProductTrackingType };
+  location: { id: string; name: string };
 }
 
 export type StockStatus = 'OK' | 'LOW' | 'OUT';

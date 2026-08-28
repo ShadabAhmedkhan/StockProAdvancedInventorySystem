@@ -1,5 +1,6 @@
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength } from 'class-validator';
+import { ProductCondition, ProductTrackingType } from '../../generated/prisma/enums';
 import { toBoolean, toMoneyString, trim, trimUppercase } from '../../common/utils/transform.util';
 import { BARCODE_PATTERN, MONEY_PATTERN, SKU_PATTERN } from '../../common/validation/patterns';
 
@@ -59,4 +60,42 @@ export class CreateProductDto {
   @IsBoolean()
   @IsOptional()
   isActive = true;
+
+  @IsEnum(ProductTrackingType)
+  @IsOptional()
+  trackingType?: ProductTrackingType = ProductTrackingType.NONE;
+
+  @IsString()
+  @MaxLength(120)
+  @Transform(trim)
+  @IsOptional()
+  model?: string;
+
+  @IsString()
+  @MaxLength(120)
+  @Transform(trim)
+  @IsOptional()
+  variant?: string;
+
+  @IsString()
+  @MaxLength(60)
+  @Transform(trim)
+  @IsOptional()
+  color?: string;
+
+  @IsString()
+  @MaxLength(60)
+  @Transform(trim)
+  @IsOptional()
+  storage?: string;
+
+  @IsEnum(ProductCondition)
+  @IsOptional()
+  condition?: ProductCondition = ProductCondition.NEW;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  warrantyMonths?: number;
 }
