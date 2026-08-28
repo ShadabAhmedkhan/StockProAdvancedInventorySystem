@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
+import { getDefaultLocationId } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { searchAcross } from '../common/pagination/search.util';
 import { getCurrentOrgId } from '../common/tenant/tenant-context';
@@ -18,14 +19,25 @@ import type { UpdateProductDto } from './dto/update-product.dto';
  * of products costs a fixed number of queries however long the page is.
  * Inventory travels with the product because a catalogue view that cannot show
  * stock is useless, and fetching it separately is the classic N+1.
+ *
+ * Inventory is per-location as of Phase 32, but every organization has
+ * exactly one Location until Phase 33 (Stock Transfers) exists, so `take: 1`
+ * keeps this response shaped exactly as before - a single inventory object,
+ * not an array - via `toProductWithRelations` below.
  */
 const PRODUCT_INCLUDE = {
   category: { select: { id: true, name: true, slug: true } },
   brand: { select: { id: true, name: true, slug: true } },
-  inventory: { select: { quantity: true, reservedQuantity: true, updatedAt: true } },
+  inventory: { select: { quantity: true, reservedQuantity: true, updatedAt: true }, take: 1 },
 } as const;
 
-export type ProductWithRelations = Prisma.ProductGetPayload<{ include: typeof PRODUCT_INCLUDE }>;
+type ProductRow = Prisma.ProductGetPayload<{ include: typeof PRODUCT_INCLUDE }>;
+
+export type ProductWithRelations = Omit<ProductRow, 'inventory'> & { inventory: ProductRow['inventory'][number] | null };
+
+function toProductWithRelations(row: ProductRow): ProductWithRelations {
+  return { ...row, inventory: row.inventory[0] ?? null };
+}
 
 @Injectable()
 export class ProductsService {
@@ -43,7 +55,7 @@ export class ProductsService {
       this.prisma.product.count({ where }),
     ]);
 
-    return paginate(items, total, query.page, query.limit);
+    return paginate(items.map(toProductWithRelations), total, query.page, query.limit);
   }
 
   async findOne(id: string, includeDeleted = false): Promise<ProductWithRelations> {
@@ -53,7 +65,7 @@ export class ProductsService {
       throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Product not found' });
     }
 
-    return product;
+    return toProductWithRelations(product);
   }
 
   /** Barcode lookup, for scanning at the counter. */
@@ -67,7 +79,7 @@ export class ProductsService {
       throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'No product has this barcode' });
     }
 
-    return product;
+    return toProductWithRelations(product);
   }
 
   /**
@@ -103,7 +115,8 @@ export class ProductsService {
         select: { id: true },
       });
 
-      await tx.inventory.create({ data: { organizationId: getCurrentOrgId(), productId: product.id, quantity: 0 } });
+      const locationId = await getDefaultLocationId(tx);
+      await tx.inventory.create({ data: { organizationId: getCurrentOrgId(), productId: product.id, locationId, quantity: 0 } });
 
       await this.auditService.record(
         { userId: callerId, action: AuditAction.CREATE, entity: AuditEntity.PRODUCT, entityId: product.id, metadata: { sku: dto.sku, name: dto.name } },

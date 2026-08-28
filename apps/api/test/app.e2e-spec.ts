@@ -97,6 +97,16 @@ describe('Stock Pro API (e2e)', () => {
     });
   });
 
+  describe('request body size limit', () => {
+    it('rejects a body over the configured limit before it reaches any route handler', async () => {
+      // Comfortably over the 1mb limit set in configureApp, and well under
+      // what a legitimate order or registration payload could ever reach.
+      const oversized = { padding: 'x'.repeat(2 * 1024 * 1024) };
+
+      await request(server).post('/api/v1/auth/register').send(oversized).expect(413);
+    });
+  });
+
   describe('routing and errors', () => {
     it('serves nothing outside the /api/v1 prefix', async () => {
       await request(server).get('/health').expect(404);

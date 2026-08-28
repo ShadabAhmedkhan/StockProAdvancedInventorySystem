@@ -4,8 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { usersApi, type CreateUserInput, type UpdateUserInput } from '@/features/users/api';
@@ -18,6 +17,99 @@ import { formatDateTime } from '@/lib/format';
 
 const ROLES = Object.keys(USER_ROLE_LABELS) as UserRole[];
 const STATUSES = Object.keys(USER_STATUS_LABELS) as UserStatus[];
+
+function userColumns({
+  isAdmin,
+  currentUserId,
+  onChangeRole,
+  onChangeStatus,
+  onEdit,
+}: {
+  isAdmin: boolean;
+  currentUserId: string | undefined;
+  onChangeRole: (id: string, newRole: UserRole) => void;
+  onChangeStatus: (id: string, newStatus: UserStatus) => void;
+  onEdit: (item: AppUser) => void;
+}): DataTableColumn<AppUser>[] {
+  return [
+    {
+      key: 'name',
+      label: 'Name',
+      render: (item) => (
+        <>
+          {item.firstName} {item.lastName}
+          {item.id === currentUserId && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+        </>
+      ),
+    },
+    { key: 'email', label: 'Email', render: (item) => <span className="text-muted-foreground">{item.email}</span> },
+    {
+      key: 'role',
+      label: 'Role',
+      render: (item) =>
+        isAdmin ? (
+          <Select
+            value={item.role}
+            onChange={(event) => {
+              onChangeRole(item.id, event.target.value as UserRole);
+            }}
+            className="h-8 text-xs"
+          >
+            {ROLES.map((value) => (
+              <option key={value} value={value}>
+                {USER_ROLE_LABELS[value]}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          USER_ROLE_LABELS[item.role]
+        ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      render: (item) =>
+        isAdmin ? (
+          <Select
+            value={item.status}
+            onChange={(event) => {
+              onChangeStatus(item.id, event.target.value as UserStatus);
+            }}
+            className="h-8 text-xs"
+          >
+            {STATUSES.map((value) => (
+              <option key={value} value={value}>
+                {USER_STATUS_LABELS[value]}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Badge className={USER_STATUS_CLASSES[item.status]}>{USER_STATUS_LABELS[item.status]}</Badge>
+        ),
+    },
+    { key: 'lastLogin', label: 'Last login', render: (item) => <span className="text-muted-foreground">{formatDateTime(item.lastLoginAt)}</span> },
+    ...(isAdmin
+      ? [
+          {
+            key: 'actions',
+            label: 'Actions',
+            align: 'right' as const,
+            render: (item: AppUser) => (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  onEdit(item);
+                }}
+              >
+                Edit
+              </Button>
+            ),
+          },
+        ]
+      : []),
+  ];
+}
 
 export default function UsersPage(): React.JSX.Element {
   const { user } = useAuth();
@@ -130,129 +222,33 @@ export default function UsersPage(): React.JSX.Element {
 
       {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Name</th>
-                    <th className="p-3 font-medium">Email</th>
-                    <th className="p-3 font-medium">Role</th>
-                    <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 font-medium">Last login</th>
-                    {isAdmin && <th className="p-3 text-right font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={isAdmin ? 6 : 5} className="p-4 text-center text-muted-foreground">
-                        No users found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((item) => (
-                    <tr key={item.id} className="border-b border-border last:border-0">
-                      <td className="p-3">
-                        {item.firstName} {item.lastName}
-                        {item.id === user?.id && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{item.email}</td>
-                      <td className="p-3">
-                        {isAdmin ? (
-                          <Select
-                            value={item.role}
-                            onChange={(event) => {
-                              void runAction(() => changeRoleMutation.mutateAsync({ id: item.id, newRole: event.target.value as UserRole }));
-                            }}
-                            className="h-8 text-xs"
-                          >
-                            {ROLES.map((value) => (
-                              <option key={value} value={value}>
-                                {USER_ROLE_LABELS[value]}
-                              </option>
-                            ))}
-                          </Select>
-                        ) : (
-                          USER_ROLE_LABELS[item.role]
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {isAdmin ? (
-                          <Select
-                            value={item.status}
-                            onChange={(event) => {
-                              void runAction(() => changeStatusMutation.mutateAsync({ id: item.id, newStatus: event.target.value as UserStatus }));
-                            }}
-                            className="h-8 text-xs"
-                          >
-                            {STATUSES.map((value) => (
-                              <option key={value} value={value}>
-                                {USER_STATUS_LABELS[value]}
-                              </option>
-                            ))}
-                          </Select>
-                        ) : (
-                          <Badge className={USER_STATUS_CLASSES[item.status]}>{USER_STATUS_LABELS[item.status]}</Badge>
-                        )}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(item.lastLoginAt)}</td>
-                      {isAdmin && (
-                        <td className="p-3 text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditingUser(item);
-                              setDialogOpen(true);
-                            }}
-                          >
-                            Edit
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={userColumns({
+          isAdmin,
+          currentUserId: user?.id,
+          onChangeRole: (id, newRole) => {
+            void runAction(() => changeRoleMutation.mutateAsync({ id, newRole }));
+          },
+          onChangeStatus: (id, newStatus) => {
+            void runAction(() => changeStatusMutation.mutateAsync({ id, newStatus }));
+          },
+          onEdit: (item) => {
+            setEditingUser(item);
+            setDialogOpen(true);
+          },
+        })}
+        rows={data?.items ?? []}
+        rowKey={(item) => item.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No users found."
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
 
       <UserFormDialog
         open={dialogOpen}

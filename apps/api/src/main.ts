@@ -5,6 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureApp, setupSwagger } from './app.setup';
 import { API_PREFIX, SWAGGER_PATH } from './common/constants/api.constants';
+import { JsonLogger } from './common/logging/json-logger.service';
 import { appConfig, type AppConfiguration } from './config/app.config';
 
 async function bootstrap(): Promise<void> {
@@ -16,7 +17,10 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, rawBody: true });
   const config = app.get<AppConfiguration>(appConfig.KEY);
 
-  app.useLogger(config.logLevels);
+  // Structured (one JSON object per line) in production, so a log
+  // aggregator can parse fields directly; Nest's own colourised console
+  // format stays in development/test, where a human is reading it live.
+  app.useLogger(config.isProduction ? new JsonLogger(config.logLevels) : config.logLevels);
   configureApp(app, config);
 
   if (config.swaggerEnabled) {

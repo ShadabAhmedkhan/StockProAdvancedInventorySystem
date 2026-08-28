@@ -284,7 +284,7 @@ export interface SeededCatalog {
  * Opening stock is written as a PURCHASE movement alongside the Inventory row,
  * because the ledger must be able to account for every unit on hand.
  */
-export async function seedCatalog(organizationId: string, createdById: string): Promise<SeededCatalog> {
+export async function seedCatalog(organizationId: string, createdById: string, locationId: string): Promise<SeededCatalog> {
   const categories = await Promise.all(
     CATEGORIES.map((category) =>
       prisma.category.upsert({
@@ -347,19 +347,23 @@ export async function seedCatalog(organizationId: string, createdById: string): 
     products.set(product.sku, product);
 
     // Opening stock is written once. Re-running the seed must not inflate it.
-    const existingInventory = await prisma.inventory.findUnique({ where: { productId: product.id }, select: { id: true } });
+    const existingInventory = await prisma.inventory.findUnique({
+      where: { productId_locationId: { productId: product.id, locationId } },
+      select: { id: true },
+    });
     if (existingInventory !== null) {
       continue;
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.inventory.create({ data: { organizationId, productId: product.id, quantity: definition.openingStock } });
+      await tx.inventory.create({ data: { organizationId, productId: product.id, locationId, quantity: definition.openingStock } });
 
       if (definition.openingStock > 0) {
         await tx.stockMovement.create({
           data: {
             organizationId,
             productId: product.id,
+            locationId,
             type: StockMovementType.PURCHASE,
             quantity: definition.openingStock,
             previousQuantity: 0,

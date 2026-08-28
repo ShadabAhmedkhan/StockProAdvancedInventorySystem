@@ -350,13 +350,13 @@ describe('Products (e2e)', () => {
 
     it('refuses to delete a product that still has units on a shelf', async () => {
       const created = await createProduct(adminToken, baseProduct('HASSTOCK'));
-      await context.prisma.inventory.update({ where: { productId: created.data.id }, data: { quantity: 7 } });
+      await context.prisma.inventory.updateMany({ where: { productId: created.data.id }, data: { quantity: 7 } });
 
       const response = await request(context.server).delete(`/api/v1/products/${created.data.id}`).set('Authorization', `Bearer ${adminToken}`).expect(409);
 
       expect((response.body as ApiErrorResponse).message).toMatch(/7 unit\(s\) in stock/);
 
-      await context.prisma.inventory.update({ where: { productId: created.data.id }, data: { quantity: 0 } });
+      await context.prisma.inventory.updateMany({ where: { productId: created.data.id }, data: { quantity: 0 } });
     });
 
     it('refuses to restore a product that was never deleted', async () => {

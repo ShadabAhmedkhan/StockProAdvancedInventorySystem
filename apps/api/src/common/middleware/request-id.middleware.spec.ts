@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { REQUEST_ID_HEADER } from '../constants/api.constants';
+import { getCurrentRequestId } from '../logging/request-id-context';
 import { requestIdMiddleware } from './request-id.middleware';
 
 interface Harness {
@@ -53,5 +54,17 @@ describe('requestIdMiddleware', () => {
 
     expect(request.requestId).not.toBe(header);
     expect(request.requestId).toMatch(UUID_PATTERN);
+  });
+
+  it('makes the id readable from AsyncLocalStorage for the rest of the request', () => {
+    const { request, response, next } = createHarness();
+    let seenDuringNext: string | undefined;
+    (next as jest.Mock).mockImplementation(() => {
+      seenDuringNext = getCurrentRequestId();
+    });
+
+    requestIdMiddleware(request, response, next);
+
+    expect(seenDuringNext).toBe(request.requestId);
   });
 });

@@ -30,7 +30,7 @@ function product(overrides: Record<string, unknown> = {}): Record<string, unknow
     deletedAt: null,
     category: { id: CATEGORY_ID, name: 'Smartphones', slug: 'smartphones' },
     brand: { id: BRAND_ID, name: 'Aureon', slug: 'aureon' },
-    inventory: { quantity: 0, reservedQuantity: 0, updatedAt: new Date() },
+    inventory: [{ quantity: 0, reservedQuantity: 0, updatedAt: new Date() }],
     ...overrides,
   };
 }
@@ -83,6 +83,7 @@ describe('ProductsService', () => {
       inventory: { create: inventoryCreate },
       category: { findUnique: categoryFindUnique },
       brand: { findUnique: brandFindUnique },
+      location: { findFirstOrThrow: jest.fn(() => Promise.resolve({ id: 'location-1' })) },
     };
 
     // A callback transaction receives the client; an array form resolves them all.
@@ -182,7 +183,7 @@ describe('ProductsService', () => {
 
       expect(transaction).toHaveBeenCalledTimes(1);
       expect(productCreate).toHaveBeenCalledTimes(1);
-      expect(inventoryCreate).toHaveBeenCalledWith({ data: { organizationId: 'org-1', productId: 'product-1', quantity: 0 } });
+      expect(inventoryCreate).toHaveBeenCalledWith({ data: { organizationId: 'org-1', productId: 'product-1', locationId: 'location-1', quantity: 0 } });
     });
 
     it('passes money through as an exact string, never a number', async () => {
@@ -249,7 +250,7 @@ describe('ProductsService', () => {
 
   describe('remove', () => {
     it('soft-deletes a product that holds no stock', async () => {
-      productFindUnique.mockResolvedValue(product({ inventory: { quantity: 0, reservedQuantity: 0, updatedAt: new Date() } }));
+      productFindUnique.mockResolvedValue(product({ inventory: [{ quantity: 0, reservedQuantity: 0, updatedAt: new Date() }] }));
 
       await service.remove('product-1', CALLER_ID);
 
@@ -258,7 +259,7 @@ describe('ProductsService', () => {
     });
 
     it('refuses to delete a product that still has units on a shelf', async () => {
-      productFindUnique.mockResolvedValue(product({ inventory: { quantity: 7, reservedQuantity: 0, updatedAt: new Date() } }));
+      productFindUnique.mockResolvedValue(product({ inventory: [{ quantity: 7, reservedQuantity: 0, updatedAt: new Date() }] }));
 
       await expect(service.remove('product-1', CALLER_ID)).rejects.toThrow(/7 unit\(s\) in stock/);
       expect(productUpdate).not.toHaveBeenCalled();

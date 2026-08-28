@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { REQUEST_ID_HEADER } from '../constants/api.constants';
+import { enterRequestIdContext } from '../logging/request-id-context';
 
 /**
  * Client-supplied ids are echoed back so a caller can correlate its own logs,
@@ -19,5 +20,6 @@ export function requestIdMiddleware(req: Request, res: Response, next: NextFunct
   const incoming = req.header(REQUEST_ID_HEADER);
   req.requestId = incoming !== undefined && SAFE_REQUEST_ID.test(incoming) ? incoming : randomUUID();
   res.setHeader(REQUEST_ID_HEADER, req.requestId);
+  enterRequestIdContext(req.requestId);
   next();
 }

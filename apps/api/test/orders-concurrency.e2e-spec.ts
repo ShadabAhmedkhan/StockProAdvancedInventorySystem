@@ -59,7 +59,7 @@ describe('Orders concurrency (e2e)', () => {
   }
 
   async function inventoryOf(productId: string): Promise<{ quantity: number; reservedQuantity: number }> {
-    const row = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const row = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
 
     return { quantity: row.quantity, reservedQuantity: row.reservedQuantity };
   }

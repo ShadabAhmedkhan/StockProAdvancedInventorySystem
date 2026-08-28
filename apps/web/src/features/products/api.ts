@@ -12,12 +12,17 @@ function query(params: Record<string, string | number | boolean | undefined>): s
   return suffix === '' ? '' : `?${suffix}`;
 }
 
+/** Matches the API's PRODUCT_SORT_FIELDS whitelist (product-query.dto.ts). */
+export type ProductSortField = 'createdAt' | 'updatedAt' | 'sku' | 'name' | 'costPrice' | 'sellingPrice' | 'minimumStock';
+
 export interface ProductListParams {
   page: number;
   search: string;
   categoryId?: string;
   brandId?: string;
   includeDeleted: boolean;
+  sortBy?: ProductSortField;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface ProductInput {
@@ -39,8 +44,8 @@ function cleanInput(input: ProductInput): Record<string, string | number | boole
 }
 
 export const productsApi = {
-  list: ({ page, search, categoryId, brandId, includeDeleted }: ProductListParams): Promise<PaginatedResult<Product>> =>
-    apiClient.getPaginated<Product>(`/products${query({ page, limit: 20, search, categoryId, brandId, includeDeleted })}`),
+  list: ({ page, search, categoryId, brandId, includeDeleted, sortBy, sortOrder }: ProductListParams): Promise<PaginatedResult<Product>> =>
+    apiClient.getPaginated<Product>(`/products${query({ page, limit: 20, search, categoryId, brandId, includeDeleted, sortBy, sortOrder })}`),
   create: (input: ProductInput): Promise<Product> => apiClient.post<Product>('/products', cleanInput(input)),
   update: (id: string, input: ProductInput): Promise<Product> => apiClient.patch<Product>(`/products/${id}`, cleanInput(input)),
   remove: (id: string): Promise<Product> => apiClient.delete<Product>(`/products/${id}`),

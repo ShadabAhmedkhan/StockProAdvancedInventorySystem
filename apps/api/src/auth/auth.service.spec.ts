@@ -2,6 +2,9 @@ import { ConflictException, ForbiddenException, UnauthorizedException } from '@n
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { AuditService } from '../audit/audit.service';
+import { EmailService } from '../common/email/email.service';
+import type { AppConfiguration } from '../config/app.config';
+import { appConfig } from '../config/app.config';
 import type { JwtConfiguration } from '../config/jwt.config';
 import { jwtConfig } from '../config/jwt.config';
 import { firstCallArg } from '../common/testing/mock-args';
@@ -9,6 +12,7 @@ import { hashPassword } from '../common/utils/password.util';
 import { AuditAction, UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
+import { PasswordResetService } from './password-reset.service';
 import { RefreshTokenService } from './refresh-token.service';
 
 const PASSWORD = 'CorrectHorse1';
@@ -19,6 +23,8 @@ const config = {
   refreshSecret: 'refresh-secret-that-is-long-enough-too',
   refreshExpiresInMs: 604_800_000,
 } as JwtConfiguration;
+
+const app = { corsOrigins: ['http://localhost:3001'] } as AppConfiguration;
 
 interface StoredUser {
   id: string;
@@ -64,6 +70,9 @@ describe('AuthService', () => {
   let revokeAllForUser: jest.Mock;
   let record: jest.Mock;
   let transaction: jest.Mock;
+  let issuePasswordReset: jest.Mock;
+  let consumePasswordReset: jest.Mock;
+  let send: jest.Mock;
 
   beforeEach(async () => {
     findUnique = jest.fn();
@@ -76,8 +85,15 @@ describe('AuthService', () => {
     revoke = jest.fn();
     revokeAllForUser = jest.fn(() => Promise.resolve(0));
     record = jest.fn(() => Promise.resolve());
+    issuePasswordReset = jest.fn(() => Promise.resolve({ token: 'reset-token-value', expiresAt: new Date(Date.now() + 1000) }));
+    consumePasswordReset = jest.fn();
+    send = jest.fn(() => Promise.resolve());
 
-    const client = { user: { findUnique, create, update, count }, organization: { create: organizationCreate } };
+    const client = {
+      user: { findUnique, create, update, count },
+      organization: { create: organizationCreate },
+      location: { create: jest.fn(() => Promise.resolve({ id: 'location-1' })) },
+    };
     transaction = jest.fn((fn: (tx: typeof client) => Promise<unknown>) => fn(client));
 
     const moduleRef = await Test.createTestingModule({
@@ -86,8 +102,11 @@ describe('AuthService', () => {
         JwtService,
         { provide: PrismaService, useValue: { ...client, $transaction: transaction } },
         { provide: RefreshTokenService, useValue: { issue, consume, revoke, revokeAllForUser } },
+        { provide: PasswordResetService, useValue: { issue: issuePasswordReset, consume: consumePasswordReset } },
         { provide: AuditService, useValue: { record } },
+        { provide: EmailService, useValue: { send } },
         { provide: jwtConfig.KEY, useValue: config },
+        { provide: appConfig.KEY, useValue: app },
       ],
     }).compile();
 
@@ -286,6 +305,58 @@ describe('AuthService', () => {
       await expect(service.currentUser({ id: 'user-1', email: 'diego@stockpro.test', role: UserRole.STAFF, organizationId: 'org-1' })).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('emails a reset link for a known, active account', async () => {
+      findUnique.mockResolvedValue({ id: 'user-1', organizationId: 'org-1', status: UserStatus.ACTIVE });
+
+      await service.forgotPassword({ email: 'diego@stockpro.test' }, {});
+
+      expect(issuePasswordReset).toHaveBeenCalledWith('user-1');
+      expect(send).toHaveBeenCalledWith(expect.objectContaining({ to: 'diego@stockpro.test' }));
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1', action: AuditAction.PASSWORD_RESET_REQUESTED }));
+    });
+
+    it('does nothing for an unknown email, without revealing that', async () => {
+      findUnique.mockResolvedValue(null);
+
+      await expect(service.forgotPassword({ email: 'nobody@stockpro.test' }, {})).resolves.toBeUndefined();
+      expect(issuePasswordReset).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('does nothing for a deactivated account', async () => {
+      findUnique.mockResolvedValue({ id: 'user-1', organizationId: 'org-1', status: UserStatus.INACTIVE });
+
+      await service.forgotPassword({ email: 'diego@stockpro.test' }, {});
+
+      expect(issuePasswordReset).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('sets the new password, revokes every session, and audits the event', async () => {
+      consumePasswordReset.mockResolvedValue('user-1');
+      update.mockResolvedValue({ organizationId: 'org-1', email: 'diego@stockpro.test' });
+
+      await service.resetPassword({ token: 'presented', password: 'NewPassword1' }, { ipAddress: '10.0.0.1' });
+
+      expect(consumePasswordReset).toHaveBeenCalledWith('presented');
+      const { passwordHash } = (firstCallArg(update) as { data: { passwordHash: string } }).data;
+      expect(passwordHash).toMatch(/^\$argon2id\$/);
+      expect(revokeAllForUser).toHaveBeenCalledWith('user-1');
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({ userId: 'user-1', action: AuditAction.PASSWORD_RESET_COMPLETED, ipAddress: '10.0.0.1' }));
+    });
+
+    it('rejects a token the store rejected, without touching the account', async () => {
+      consumePasswordReset.mockResolvedValue(null);
+
+      await expect(service.resetPassword({ token: 'stale', password: 'NewPassword1' }, {})).rejects.toThrow(UnauthorizedException);
+      expect(update).not.toHaveBeenCalled();
+      expect(revokeAllForUser).not.toHaveBeenCalled();
     });
   });
 });

@@ -97,7 +97,7 @@ describe('Stock concurrency (e2e)', () => {
 
     await fireConcurrently(productId, StockMovementType.ADJUSTMENT_OUT, 1, 25);
 
-    const inventory = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const inventory = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
     expect(inventory.quantity).toBe(0);
     expect(inventory.quantity).toBeGreaterThanOrEqual(0);
   });
@@ -130,7 +130,7 @@ describe('Stock concurrency (e2e)', () => {
     const inbound = new Set<StockMovementType>([StockMovementType.PURCHASE, StockMovementType.ADJUSTMENT_IN]);
     const net = movements.reduce((sum, movement) => sum + (inbound.has(movement.type) ? movement.quantity : -movement.quantity), 0);
 
-    const inventory = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const inventory = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
     expect(inventory.quantity).toBe(net);
     expect(inventory.quantity).toBeGreaterThanOrEqual(0);
   });
@@ -152,7 +152,7 @@ describe('Stock concurrency (e2e)', () => {
       .filter((response) => response.status === 200)
       .reduce((sum, response) => sum + ((response.body as ApiResponse<{ quantity: number }>).data.quantity || 0), 0);
 
-    const inventory = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const inventory = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
 
     expect(withdrawn).toBeLessThanOrEqual(30);
     expect(inventory.quantity).toBe(30 - withdrawn);
@@ -161,19 +161,19 @@ describe('Stock concurrency (e2e)', () => {
 
   it('honours a reservation while concurrent withdrawals compete for the rest', async () => {
     const productId = await createStockedProduct('RESERVED', 20);
-    await context.prisma.inventory.update({ where: { productId }, data: { reservedQuantity: 12 } });
+    await context.prisma.inventory.updateMany({ where: { productId }, data: { reservedQuantity: 12 } });
 
     // Only eight units are actually free.
     const statuses = await fireConcurrently(productId, StockMovementType.ADJUSTMENT_OUT, 1, 20);
     const succeeded = statuses.filter((status) => status === 200).length;
 
-    const inventory = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const inventory = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
 
     expect(succeeded).toBe(8);
     expect(inventory.quantity).toBe(12);
     // The database check constraint would have rejected any breach of this.
     expect(inventory.quantity).toBeGreaterThanOrEqual(inventory.reservedQuantity);
 
-    await context.prisma.inventory.update({ where: { productId }, data: { reservedQuantity: 0 } });
+    await context.prisma.inventory.updateMany({ where: { productId }, data: { reservedQuantity: 0 } });
   });
 });

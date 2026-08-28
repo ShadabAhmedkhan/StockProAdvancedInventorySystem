@@ -2,7 +2,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
-    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo"
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo",
+    // Overrides the shared preset's sourceMap:true (useful for local dev/test
+    // stack traces) - a production artifact must not ship .map files, which
+    // let anyone with the deployed image reconstruct the original source.
+    "sourceMap": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "coverage", "test", "**/*.spec.ts", "src/common/testing/**"]

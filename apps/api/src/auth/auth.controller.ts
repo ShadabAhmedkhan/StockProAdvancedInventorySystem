@@ -11,8 +11,10 @@ import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.
 import { jwtConfig } from '../config/jwt.config';
 import { AuthService, type AuthSession } from './auth.service';
 import type { AuthResult, PublicUser } from './dto/auth-response.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import type { RefreshTokenContext } from './refresh-token.service';
 
 const ONE_MINUTE_MS = 60_000;
@@ -25,6 +27,9 @@ const ONE_MINUTE_MS = 60_000;
 const LOGIN_RATE_LIMIT = { default: { limit: 5, ttl: ONE_MINUTE_MS } };
 const REGISTER_RATE_LIMIT = { default: { limit: 10, ttl: ONE_MINUTE_MS } };
 const REFRESH_RATE_LIMIT = { default: { limit: 30, ttl: ONE_MINUTE_MS } };
+/** A little more generous than login: a human may retry across a couple of typo'd addresses, still useless for enumeration at scale. */
+const FORGOT_PASSWORD_RATE_LIMIT = { default: { limit: 10, ttl: ONE_MINUTE_MS } };
+const RESET_PASSWORD_RATE_LIMIT = { default: { limit: 10, ttl: ONE_MINUTE_MS } };
 
 /** Length cap on values copied from request headers into the session record. */
 const USER_AGENT_MAX = 255;
@@ -84,6 +89,29 @@ export class AuthController {
       this.clearRefreshCookie(response);
       throw error;
     }
+  }
+
+  @Public()
+  @Throttle(FORGOT_PASSWORD_RATE_LIMIT)
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Request a password reset link',
+    description: 'Always responds the same way, whether or not the email belongs to an account, so the endpoint cannot be used to enumerate registered users.',
+  })
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() request: Request): Promise<{ success: true }> {
+    await this.authService.forgotPassword(dto, sessionContext(request));
+    return { success: true };
+  }
+
+  @Public()
+  @Throttle(RESET_PASSWORD_RATE_LIMIT)
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Set a new password using a reset token, and revoke every existing session' })
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() request: Request): Promise<{ success: true }> {
+    await this.authService.resetPassword(dto, sessionContext(request));
+    return { success: true };
   }
 
   @Public()

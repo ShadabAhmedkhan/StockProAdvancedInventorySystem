@@ -115,8 +115,18 @@ describe('Database schema (integration)', () => {
     });
 
     it('leaves completed orders fully paid and stamped with a completion time', async () => {
+      // Scoped to the seed's own six orders (ORD-00000001..6 - see
+      // prisma/seed/operations.seed.ts's ORDERS list): this suite runs
+      // against a database that accumulates data across repeated local runs.
+      // Playwright's own orders spec signs in as the seeded admin/staff
+      // accounts and completes a real sale with no payment step (completion
+      // does not require full payment - that's the app's real, intended
+      // behaviour, not a bug), which would otherwise land inside this same
+      // organization and falsely fail an invariant that only ever held for
+      // the seed's own hand-picked orders.
+      const seedAdmin = await prisma.user.findUniqueOrThrow({ where: { email: 'admin@stockpro.test' }, select: { organizationId: true } });
       const completed = await prisma.order.findMany({
-        where: { status: 'COMPLETED' },
+        where: { status: 'COMPLETED', organizationId: seedAdmin.organizationId, orderNumber: { lte: 'ORD-00000006' } },
         select: { orderNumber: true, total: true, paidAmount: true, completedAt: true },
       });
 

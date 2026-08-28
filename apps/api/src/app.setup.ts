@@ -1,4 +1,5 @@
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -11,6 +12,15 @@ import type { AppConfiguration } from './config/app.config';
 import { serialiseDecimalsAsFixedStrings } from './prisma/decimal-json';
 
 const CORS_MAX_AGE_SECONDS = 86_400;
+
+/**
+ * No endpoint accepts file uploads today, so every legitimate request body is
+ * a small JSON document (the largest is an order with many line items). 1mb
+ * is generous for that and small enough that a client cannot tie up a worker
+ * buffering an oversized body - an explicit, reviewed limit rather than
+ * whatever `express.json()`'s own default happens to be.
+ */
+const BODY_SIZE_LIMIT = '1mb';
 
 /**
  * Swagger UI is the only HTML this API serves and it ships an inline
@@ -42,6 +52,14 @@ function securityHeaders(swaggerEnabled: boolean): ReturnType<typeof helmet> {
  */
 export function configureApp(app: INestApplication, config: AppConfiguration): void {
   serialiseDecimalsAsFixedStrings();
+
+  // Replaces Nest's default-configured body parsers with explicitly
+  // size-limited ones. `req.rawBody` (needed by the Stripe webhook signature
+  // check) keeps populating because `rawBody: true` was passed to
+  // `NestFactory.create` - that app-level option is what these parsers honor.
+  const expressApp = app as NestExpressApplication;
+  expressApp.useBodyParser('json', { limit: BODY_SIZE_LIMIT });
+  expressApp.useBodyParser('urlencoded', { limit: BODY_SIZE_LIMIT, extended: true });
 
   // First in the chain: everything downstream reads req.requestId.
   app.use(requestIdMiddleware);

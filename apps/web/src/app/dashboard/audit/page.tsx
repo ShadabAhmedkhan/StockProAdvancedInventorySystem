@@ -2,15 +2,29 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Select } from '@/components/ui/select';
 import { auditApi } from '@/features/audit/api';
 import { AUDIT_ACTION_LABELS, AUDIT_ENTITY_LABELS } from '@/features/audit/labels';
-import type { AuditAction, AuditEntity } from '@/features/audit/types';
-import { errorMessage } from '@/lib/error-message';
+import type { AuditAction, AuditEntity, AuditLog } from '@/features/audit/types';
 import { formatDateTime } from '@/lib/format';
+
+const AUDIT_COLUMNS: DataTableColumn<AuditLog>[] = [
+  { key: 'when', label: 'When', render: (entry) => <span className="text-muted-foreground">{formatDateTime(entry.createdAt)}</span> },
+  { key: 'actor', label: 'Actor', render: (entry) => (entry.user === null ? 'System' : `${entry.user.firstName} ${entry.user.lastName}`) },
+  { key: 'action', label: 'Action', render: (entry) => AUDIT_ACTION_LABELS[entry.action] },
+  {
+    key: 'entity',
+    label: 'Entity',
+    render: (entry) => (
+      <span className="text-muted-foreground">
+        {AUDIT_ENTITY_LABELS[entry.entity]}
+        {entry.entityId !== null && <span className="ml-1 font-mono text-xs">({entry.entityId.slice(0, 8)})</span>}
+      </span>
+    ),
+  },
+  { key: 'ip', label: 'IP', render: (entry) => <span className="text-muted-foreground">{entry.ipAddress ?? '-'}</span> },
+];
 
 const ACTIONS = Object.keys(AUDIT_ACTION_LABELS) as AuditAction[];
 const ENTITIES = Object.keys(AUDIT_ENTITY_LABELS) as AuditEntity[];
@@ -65,78 +79,20 @@ export default function AuditPage(): React.JSX.Element {
         </Select>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">When</th>
-                    <th className="p-3 font-medium">Actor</th>
-                    <th className="p-3 font-medium">Action</th>
-                    <th className="p-3 font-medium">Entity</th>
-                    <th className="p-3 font-medium">IP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="p-4 text-center text-muted-foreground">
-                        No audit entries found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((entry) => (
-                    <tr key={entry.id} className="border-b border-border last:border-0">
-                      <td className="p-3 text-muted-foreground">{formatDateTime(entry.createdAt)}</td>
-                      <td className="p-3">{entry.user === null ? 'System' : `${entry.user.firstName} ${entry.user.lastName}`}</td>
-                      <td className="p-3">{AUDIT_ACTION_LABELS[entry.action]}</td>
-                      <td className="p-3 text-muted-foreground">
-                        {AUDIT_ENTITY_LABELS[entry.entity]}
-                        {entry.entityId !== null && <span className="ml-1 font-mono text-xs">({entry.entityId.slice(0, 8)})</span>}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{entry.ipAddress ?? '-'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={AUDIT_COLUMNS}
+        rows={data?.items ?? []}
+        rowKey={(entry) => entry.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No audit entries found."
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
     </div>
   );
 }

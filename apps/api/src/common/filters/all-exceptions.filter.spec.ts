@@ -122,4 +122,37 @@ describe('AllExceptionsFilter', () => {
     expect(body.message).toBe('Internal server error');
     expect(JSON.stringify(body)).not.toContain('secret');
   });
+
+  it('maps a plain error with a middleware-style status to that status, not 500', () => {
+    const failure = Object.assign(new Error('request entity too large'), { status: 413, type: 'entity.too.large' });
+
+    const body = capture(failure);
+
+    expect(body.statusCode).toBe(413);
+    expect(body.code).toBe(ErrorCode.PAYLOAD_TOO_LARGE);
+    expect(body.message).toBe('request entity too large');
+  });
+
+  it('reads statusCode as well as status, for middleware that uses the other spelling', () => {
+    const failure = Object.assign(new Error('bad request'), { statusCode: 400 });
+
+    const body = capture(failure);
+
+    expect(body.statusCode).toBe(400);
+  });
+
+  it('still treats a middleware error as a client fault worth only a warning', () => {
+    capture(Object.assign(new Error('request entity too large'), { status: 413 }));
+
+    expect(loggedWarnings).toHaveBeenCalledTimes(1);
+    expect(loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it('ignores a status outside the 4xx range, so a mislabeled error still falls through to 500', () => {
+    const failure = Object.assign(new Error('oops'), { status: 599 });
+
+    const body = capture(failure);
+
+    expect(body.statusCode).toBe(HttpStatus.INTERNAL_SERVER_ERROR);
+  });
 });

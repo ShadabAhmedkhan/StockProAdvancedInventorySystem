@@ -8,7 +8,7 @@ test.afterEach(async ({ page }) => {
 
 test.describe('finance', () => {
   test('recording an expense shows up in the list and moves the summary total', async ({ page }) => {
-    const expensesKpi = page.locator('.rounded-md.border').filter({ hasText: 'Expenses' }).first();
+    const expensesKpi = page.locator('.rounded-lg.border').filter({ hasText: 'Expenses' }).first();
 
     await page.goto('/dashboard/finance');
     await page.getByRole('button', { name: 'Summary' }).click();

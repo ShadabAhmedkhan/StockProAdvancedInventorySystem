@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/error-message';
@@ -29,7 +30,8 @@ interface EntityCrudPageProps<T extends EntityBase> {
 }
 
 function emptyValues(fields: FormField[]): Record<string, string> {
-  return Object.fromEntries(fields.map((field) => [field.name, '']));
+  // A select defaults to its first option, since '' would not be a valid selection for it.
+  return Object.fromEntries(fields.map((field) => [field.name, field.type === 'select' ? (field.options?.[0]?.value ?? '') : '']));
 }
 
 function toDisplayString(value: unknown): string {
@@ -309,6 +311,20 @@ export function EntityCrudPage<T extends EntityBase>({
                     setValues((current) => ({ ...current, [field.name]: event.target.value }));
                   }}
                 />
+              ) : field.type === 'select' ? (
+                <Select
+                  id={field.name}
+                  value={values[field.name] ?? ''}
+                  onChange={(event) => {
+                    setValues((current) => ({ ...current, [field.name]: event.target.value }));
+                  }}
+                >
+                  {field.options?.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
               ) : (
                 <Input
                   id={field.name}

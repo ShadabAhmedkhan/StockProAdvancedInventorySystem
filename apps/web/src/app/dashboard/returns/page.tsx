@@ -5,15 +5,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Select } from '@/components/ui/select';
 import { returnsApi } from '@/features/returns/api';
 import { ReturnStatusBadge } from '@/features/returns/components/return-status-badge';
 import { RETURN_REASON_LABELS, RETURN_STATUS_LABELS } from '@/features/returns/labels';
-import type { ReturnReason, ReturnStatus } from '@/features/returns/types';
+import type { ReturnReason, ReturnStatus, ReturnSummary } from '@/features/returns/types';
 import { useAuth } from '@/hooks/use-auth';
-import { errorMessage } from '@/lib/error-message';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 
 const RAISE_ROLES = new Set(['ADMIN', 'MANAGER', 'STAFF']);
@@ -85,87 +83,46 @@ export default function ReturnsPage(): React.JSX.Element {
         </Select>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Return #</th>
-                    <th className="p-3 font-medium">Order</th>
-                    <th className="p-3 font-medium">Customer</th>
-                    <th className="p-3 font-medium">Reason</th>
-                    <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 text-right font-medium">Refund</th>
-                    <th className="p-3 font-medium">Raised</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="p-4 text-center text-muted-foreground">
-                        No returns found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((returnRecord) => (
-                    <tr key={returnRecord.id} className="border-b border-border last:border-0 hover:bg-muted">
-                      <td className="p-3">
-                        <Link href={`/dashboard/returns/${returnRecord.id}`} className="font-medium hover:underline">
-                          {returnRecord.returnNumber}
-                        </Link>
-                      </td>
-                      <td className="p-3 text-muted-foreground">{returnRecord.order.orderNumber}</td>
-                      <td className="p-3 text-muted-foreground">
-                        {returnRecord.customer === null ? '-' : `${returnRecord.customer.firstName} ${returnRecord.customer.lastName}`}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{RETURN_REASON_LABELS[returnRecord.reason]}</td>
-                      <td className="p-3">
-                        <ReturnStatusBadge status={returnRecord.status} />
-                      </td>
-                      <td className="p-3 text-right tabular-nums">{formatCurrency(returnRecord.refundAmount)}</td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(returnRecord.createdAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={RETURN_COLUMNS}
+        rows={data?.items ?? []}
+        rowKey={(returnRecord) => returnRecord.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No returns found."
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
     </div>
   );
 }
+
+const RETURN_COLUMNS: DataTableColumn<ReturnSummary>[] = [
+  {
+    key: 'returnNumber',
+    label: 'Return #',
+    render: (returnRecord) => (
+      <Link href={`/dashboard/returns/${returnRecord.id}`} className="font-medium hover:underline">
+        {returnRecord.returnNumber}
+      </Link>
+    ),
+  },
+  { key: 'order', label: 'Order', render: (returnRecord) => <span className="text-muted-foreground">{returnRecord.order.orderNumber}</span> },
+  {
+    key: 'customer',
+    label: 'Customer',
+    render: (returnRecord) => (
+      <span className="text-muted-foreground">
+        {returnRecord.customer === null ? '-' : `${returnRecord.customer.firstName} ${returnRecord.customer.lastName}`}
+      </span>
+    ),
+  },
+  { key: 'reason', label: 'Reason', render: (returnRecord) => <span className="text-muted-foreground">{RETURN_REASON_LABELS[returnRecord.reason]}</span> },
+  { key: 'status', label: 'Status', render: (returnRecord) => <ReturnStatusBadge status={returnRecord.status} /> },
+  { key: 'refund', label: 'Refund', align: 'right', render: (returnRecord) => <span className="tabular-nums">{formatCurrency(returnRecord.refundAmount)}</span> },
+  { key: 'raised', label: 'Raised', render: (returnRecord) => <span className="text-muted-foreground">{formatDateTime(returnRecord.createdAt)}</span> },
+];

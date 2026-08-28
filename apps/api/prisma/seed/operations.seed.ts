@@ -247,8 +247,9 @@ export async function seedOperations(
   users: SeededUsers,
   customers: SeededCustomers,
   catalog: SeededCatalog,
+  locationId: string,
 ): Promise<SeededOperations> {
-  await seedOrders(organizationId, users, customers, catalog);
+  await seedOrders(organizationId, users, customers, catalog, locationId);
   await seedRepairs(organizationId, users, customers);
   await seedExpenses(organizationId, users);
   await advanceDocumentSequences();
@@ -261,7 +262,13 @@ export async function seedOperations(
  * stock, records the SALE movements, the payment and the ledger entry - the
  * same set of writes the order-completion endpoint will perform.
  */
-async function seedOrders(organizationId: string, users: SeededUsers, customers: SeededCustomers, catalog: SeededCatalog): Promise<void> {
+async function seedOrders(
+  organizationId: string,
+  users: SeededUsers,
+  customers: SeededCustomers,
+  catalog: SeededCatalog,
+  locationId: string,
+): Promise<void> {
   const cashier = users.staff[0] ?? users.admin;
 
   for (const definition of ORDERS) {
@@ -325,7 +332,7 @@ async function seedOrders(organizationId: string, users: SeededUsers, customers:
       if (isCompleted) {
         for (const line of lines) {
           const inventory = await tx.inventory.update({
-            where: { productId: line.product.id },
+            where: { productId_locationId: { productId: line.product.id, locationId } },
             data: { quantity: { decrement: line.quantity } },
             select: { quantity: true },
           });
@@ -334,6 +341,7 @@ async function seedOrders(organizationId: string, users: SeededUsers, customers:
             data: {
               organizationId,
               productId: line.product.id,
+              locationId,
               type: StockMovementType.SALE,
               quantity: line.quantity,
               previousQuantity: inventory.quantity + line.quantity,

@@ -159,6 +159,7 @@ describe('ReturnsService', () => {
       payment: { create: paymentCreate, aggregate: paymentAggregate, findMany: jest.fn(() => Promise.resolve([])) },
       financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       stockMovement: { createMany: movementCreateMany },
+      location: { findFirstOrThrow: jest.fn(() => Promise.resolve({ id: 'location-1' })) },
       $queryRaw: queryRaw,
     };
 

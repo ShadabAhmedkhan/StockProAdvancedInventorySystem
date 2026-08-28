@@ -5,13 +5,13 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { financeApi, type CreateExpenseInput, type CreateOtherIncomeInput, type UpdateExpenseInput } from '@/features/finance/api';
 import { ExpenseFormDialog } from '@/features/finance/components/expense-form-dialog';
 import { RecordIncomeDialog } from '@/features/finance/components/record-income-dialog';
 import { EXPENSE_CATEGORY_LABELS, TRANSACTION_TYPE_LABELS } from '@/features/finance/labels';
-import type { Expense } from '@/features/finance/types';
+import type { Expense, FinancePayment, FinancialTransaction } from '@/features/finance/types';
 import { PAYMENT_METHOD_LABELS } from '@/features/orders/labels';
 import { useAuth } from '@/hooks/use-auth';
 import { cn } from '@/lib/utils';
@@ -163,6 +163,48 @@ function KpiCard({ label, value, hint }: { label: string; value: string; hint?: 
   );
 }
 
+function expenseColumns(canManage: boolean, deleting: boolean, onDelete: (expense: Expense) => void, onEdit: (expense: Expense) => void): DataTableColumn<Expense>[] {
+  return [
+    { key: 'expenseNumber', label: 'Expense #', render: (expense) => expense.expenseNumber },
+    { key: 'category', label: 'Category', render: (expense) => <span className="text-muted-foreground">{EXPENSE_CATEGORY_LABELS[expense.category]}</span> },
+    { key: 'description', label: 'Description', render: (expense) => <span className="text-muted-foreground">{expense.description}</span> },
+    { key: 'amount', label: 'Amount', align: 'right', render: (expense) => <span className="tabular-nums">{formatCurrency(expense.amount)}</span> },
+    { key: 'date', label: 'Date', render: (expense) => <span className="text-muted-foreground">{formatDateTime(expense.expenseDate)}</span> },
+    ...(canManage
+      ? [
+          {
+            key: 'actions',
+            label: 'Actions',
+            align: 'right' as const,
+            render: (expense: Expense) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onEdit(expense);
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onDelete(expense);
+                  }}
+                  disabled={deleting}
+                >
+                  Delete
+                </Button>
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
+}
+
 function ExpensesTab({ canManage }: { canManage: boolean }): React.JSX.Element {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -205,102 +247,25 @@ function ExpensesTab({ canManage }: { canManage: boolean }): React.JSX.Element {
         )}
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Expense #</th>
-                    <th className="p-3 font-medium">Category</th>
-                    <th className="p-3 font-medium">Description</th>
-                    <th className="p-3 text-right font-medium">Amount</th>
-                    <th className="p-3 font-medium">Date</th>
-                    {canManage && <th className="p-3 text-right font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={canManage ? 6 : 5} className="p-4 text-center text-muted-foreground">
-                        No expenses found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((expense) => (
-                    <tr key={expense.id} className="border-b border-border last:border-0">
-                      <td className="p-3">{expense.expenseNumber}</td>
-                      <td className="p-3 text-muted-foreground">{EXPENSE_CATEGORY_LABELS[expense.category]}</td>
-                      <td className="p-3 text-muted-foreground">{expense.description}</td>
-                      <td className="p-3 text-right tabular-nums">{formatCurrency(expense.amount)}</td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(expense.expenseDate)}</td>
-                      {canManage && (
-                        <td className="p-3 text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingExpense(expense);
-                                setDialogOpen(true);
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                void removeMutation.mutateAsync(expense.id);
-                              }}
-                              disabled={removeMutation.isPending}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={expenseColumns(canManage, removeMutation.isPending, (expense) => {
+          void removeMutation.mutateAsync(expense.id);
+        }, (expense) => {
+          setEditingExpense(expense);
+          setDialogOpen(true);
+        })}
+        rows={data?.items ?? []}
+        rowKey={(expense) => expense.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No expenses found."
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
 
       <ExpenseFormDialog
         open={dialogOpen}
@@ -330,95 +295,59 @@ function PaymentsTab(): React.JSX.Element {
   });
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Payment #</th>
-                    <th className="p-3 font-medium">Method</th>
-                    <th className="p-3 font-medium">Source</th>
-                    <th className="p-3 text-right font-medium">Amount</th>
-                    <th className="p-3 font-medium">Paid</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="p-4 text-center text-muted-foreground">
-                        No payments found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((payment) => (
-                    <tr key={payment.id} className="border-b border-border last:border-0">
-                      <td className="p-3">{payment.paymentNumber}</td>
-                      <td className="p-3 text-muted-foreground">{PAYMENT_METHOD_LABELS[payment.method]}</td>
-                      <td className="p-3 text-muted-foreground">
-                        {payment.order !== null && (
-                          <Link href={`/dashboard/orders/${payment.order.id}`} className="hover:underline">
-                            {payment.order.orderNumber}
-                          </Link>
-                        )}
-                        {payment.repair !== null && (
-                          <Link href={`/dashboard/repairs/${payment.repair.id}`} className="hover:underline">
-                            {payment.repair.repairNumber}
-                          </Link>
-                        )}
-                        {payment.returnRecord !== null && (
-                          <Link href={`/dashboard/returns/${payment.returnRecord.id}`} className="hover:underline">
-                            {payment.returnRecord.returnNumber}
-                          </Link>
-                        )}
-                      </td>
-                      <td className="p-3 text-right tabular-nums">{formatCurrency(payment.amount)}</td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(payment.paidAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+    <DataTable
+      columns={PAYMENT_COLUMNS}
+      rows={data?.items ?? []}
+      rowKey={(payment) => payment.id}
+      isLoading={isLoading}
+      isError={isError}
+      error={error}
+      emptyMessage="No payments found."
+      pagination={
+        data === undefined
+          ? undefined
+          : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+      }
+    />
   );
 }
+
+const PAYMENT_COLUMNS: DataTableColumn<FinancePayment>[] = [
+  { key: 'paymentNumber', label: 'Payment #', render: (payment) => payment.paymentNumber },
+  { key: 'method', label: 'Method', render: (payment) => <span className="text-muted-foreground">{PAYMENT_METHOD_LABELS[payment.method]}</span> },
+  {
+    key: 'source',
+    label: 'Source',
+    render: (payment) => (
+      <span className="text-muted-foreground">
+        {payment.order !== null && (
+          <Link href={`/dashboard/orders/${payment.order.id}`} className="hover:underline">
+            {payment.order.orderNumber}
+          </Link>
+        )}
+        {payment.repair !== null && (
+          <Link href={`/dashboard/repairs/${payment.repair.id}`} className="hover:underline">
+            {payment.repair.repairNumber}
+          </Link>
+        )}
+        {payment.returnRecord !== null && (
+          <Link href={`/dashboard/returns/${payment.returnRecord.id}`} className="hover:underline">
+            {payment.returnRecord.returnNumber}
+          </Link>
+        )}
+      </span>
+    ),
+  },
+  { key: 'amount', label: 'Amount', align: 'right', render: (payment) => <span className="tabular-nums">{formatCurrency(payment.amount)}</span> },
+  { key: 'paid', label: 'Paid', render: (payment) => <span className="text-muted-foreground">{formatDateTime(payment.paidAt)}</span> },
+];
+
+const TRANSACTION_COLUMNS: DataTableColumn<FinancialTransaction>[] = [
+  { key: 'type', label: 'Type', render: (transaction) => TRANSACTION_TYPE_LABELS[transaction.type] },
+  { key: 'description', label: 'Description', render: (transaction) => <span className="text-muted-foreground">{transaction.description}</span> },
+  { key: 'amount', label: 'Amount', align: 'right', render: (transaction) => <span className="tabular-nums">{formatCurrency(transaction.amount)}</span> },
+  { key: 'occurred', label: 'Occurred', render: (transaction) => <span className="text-muted-foreground">{formatDateTime(transaction.occurredAt)}</span> },
+];
 
 function TransactionsTab({ canManage }: { canManage: boolean }): React.JSX.Element {
   const queryClient = useQueryClient();
@@ -452,73 +381,20 @@ function TransactionsTab({ canManage }: { canManage: boolean }): React.JSX.Eleme
         </div>
       )}
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Type</th>
-                    <th className="p-3 font-medium">Description</th>
-                    <th className="p-3 text-right font-medium">Amount</th>
-                    <th className="p-3 font-medium">Occurred</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={4} className="p-4 text-center text-muted-foreground">
-                        No transactions found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((transaction) => (
-                    <tr key={transaction.id} className="border-b border-border last:border-0">
-                      <td className="p-3">{TRANSACTION_TYPE_LABELS[transaction.type]}</td>
-                      <td className="p-3 text-muted-foreground">{transaction.description}</td>
-                      <td className="p-3 text-right tabular-nums">{formatCurrency(transaction.amount)}</td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(transaction.occurredAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={TRANSACTION_COLUMNS}
+        rows={data?.items ?? []}
+        rowKey={(transaction) => transaction.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No transactions found."
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
 
       <RecordIncomeDialog
         open={dialogOpen}

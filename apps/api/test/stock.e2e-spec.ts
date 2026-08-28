@@ -134,7 +134,7 @@ describe('Stock (e2e)', () => {
     it('treats reserved units as unavailable', async () => {
       const productId = await createProduct('RESV');
       await adjust(adminToken, { productId, type: StockMovementType.PURCHASE, quantity: 10 });
-      await context.prisma.inventory.update({ where: { productId }, data: { reservedQuantity: 8 } });
+      await context.prisma.inventory.updateMany({ where: { productId }, data: { reservedQuantity: 8 } });
 
       const response = await adjust(adminToken, { productId, type: StockMovementType.ADJUSTMENT_OUT, quantity: 5 }, 409);
       expect((response.body as ApiErrorResponse).message).toMatch(/only 2 available \(10 on hand, 8 reserved\)/);
@@ -143,7 +143,7 @@ describe('Stock (e2e)', () => {
       await adjust(adminToken, { productId, type: StockMovementType.ADJUSTMENT_OUT, quantity: 2 });
       expect((await levelOf(productId)).quantity).toBe(8);
 
-      await context.prisma.inventory.update({ where: { productId }, data: { reservedQuantity: 0 } });
+      await context.prisma.inventory.updateMany({ where: { productId }, data: { reservedQuantity: 0 } });
     });
 
     it.each([

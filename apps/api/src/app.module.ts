@@ -21,15 +21,18 @@ import { jwtConfig } from './config/jwt.config';
 import { platformAdminConfig } from './config/platform-admin.config';
 import { stripeConfig } from './config/stripe.config';
 import { HealthModule } from './health/health.module';
+import { LocationsModule } from './locations/locations.module';
 import { OrdersModule } from './orders/orders.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { RepairsModule } from './repairs/repairs.module';
 import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
 import { SettingsModule } from './settings/settings.module';
 import { StockModule } from './stock/stock.module';
+import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
 
@@ -62,8 +65,11 @@ import { UsersModule } from './users/users.module';
     CategoriesModule,
     BrandsModule,
     ProductsModule,
+    LocationsModule,
     StockModule,
     OrdersModule,
+    PurchaseOrdersModule,
+    StockTransfersModule,
     RepairsModule,
     ReturnsModule,
     FinanceModule,

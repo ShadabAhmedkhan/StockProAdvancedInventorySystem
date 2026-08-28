@@ -15,7 +15,9 @@ export interface Column<T> {
 export interface FormField {
   name: string;
   label: string;
-  type?: 'text' | 'email' | 'textarea';
+  type?: 'text' | 'email' | 'textarea' | 'select';
+  /** Required when type is 'select'. */
+  options?: { value: string; label: string }[];
   required?: boolean;
   placeholder?: string;
 }

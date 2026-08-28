@@ -21,8 +21,8 @@ async function main(): Promise<void> {
   const users = await seedUsers(organization.id);
   const customers = await seedCustomers(organization.id);
   const supplierCount = await seedSuppliers(organization.id);
-  const catalog = await seedCatalog(organization.id, users.admin.id);
-  const operations = await seedOperations(organization.id, users, customers, catalog);
+  const catalog = await seedCatalog(organization.id, users.admin.id, organization.defaultLocationId);
+  const operations = await seedOperations(organization.id, users, customers, catalog, organization.defaultLocationId);
   const platformAdmin = await seedPlatformAdmin();
 
   const inventoryUnits = await prisma.inventory.aggregate({ _sum: { quantity: true } });

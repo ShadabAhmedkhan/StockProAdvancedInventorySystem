@@ -46,6 +46,8 @@ enum StockMovementType {
   ADJUSTMENT_OUT
   REPAIR_IN
   REPAIR_OUT
+  TRANSFER_OUT
+  TRANSFER_IN
 }
 
 /// What caused a stock movement. `referenceId` points at a row of that kind.
@@ -55,6 +57,7 @@ enum StockReferenceType {
   REPAIR
   PURCHASE
   MANUAL
+  TRANSFER
 }
 
 enum OrderStatus {
@@ -159,6 +162,8 @@ enum AuditAction {
   LOGOUT
   ROLE_CHANGED
   STATUS_CHANGED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
   STOCK_ADJUSTED
   ORDER_COMPLETED
   ORDER_CANCELLED
@@ -167,6 +172,15 @@ enum AuditAction {
   REPAIR_STATUS_CHANGED
   PAYMENT_RECORDED
   EXPENSE_RECORDED
+  PURCHASE_ORDER_APPROVED
+  PURCHASE_ORDER_ORDERED
+  PURCHASE_ORDER_CANCELLED
+  GOODS_RECEIPT_RECORDED
+  STOCK_TRANSFER_REQUESTED
+  STOCK_TRANSFER_APPROVED
+  STOCK_TRANSFER_SHIPPED
+  STOCK_TRANSFER_COMPLETED
+  STOCK_TRANSFER_CANCELLED
 }
 
 enum AuditEntity {
@@ -185,6 +199,32 @@ enum AuditEntity {
   PAYMENT
   SETTING
   ORGANIZATION
+  PURCHASE_ORDER
+  GOODS_RECEIPT
+  STOCK_TRANSFER
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  APPROVED
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+/// The stock transfer lifecycle: DRAFT -> REQUESTED -> APPROVED -> IN_TRANSIT
+/// -> COMPLETED, with CANCELLED reachable from DRAFT/REQUESTED/APPROVED only -
+/// once stock has actually left the source (IN_TRANSIT) a transfer runs to
+/// completion, the same reasoning as PurchaseOrder refusing to cancel once
+/// receiving has started.
+enum StockTransferStatus {
+  DRAFT
+  REQUESTED
+  APPROVED
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
 }
 
 enum SettingValueType {
@@ -200,6 +240,12 @@ enum SubscriptionStatus {
   PAST_DUE
   CANCELED
   SUSPENDED
+}
+
+enum LocationType {
+  STORE
+  WAREHOUSE
+  SERVICE_CENTER
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +281,10 @@ model Organization {
   auditLogs             AuditLog[]
   settings              Setting[]
   stockMovements        StockMovement[]
+  purchaseOrders        PurchaseOrder[]
+  goodsReceipts         GoodsReceipt[]
+  locations             Location[]
+  stockTransfers        StockTransfer[]
 
   @@index([subscriptionStatus])
 }
@@ -272,6 +322,7 @@ model User {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   refreshTokens        RefreshToken[]
+  passwordResetTokens  PasswordResetToken[]
   auditLogs            AuditLog[]
   stockMovements       StockMovement[]
   ordersCreated        Order[]
@@ -281,6 +332,10 @@ model User {
   expensesCreated      Expense[]
   paymentsRecorded     Payment[]
   transactionsRecorded FinancialTransaction[]
+  purchaseOrdersCreated PurchaseOrder[]
+  goodsReceiptsRecorded GoodsReceipt[]
+  locationAccess        UserLocationAccess[]
+  stockTransfersCreated StockTransfer[]
 
   @@index([organizationId])
   @@index([role])
@@ -298,6 +353,23 @@ model RefreshToken {
   ipAddress String?   @db.VarChar(64)
   expiresAt DateTime
   revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// One row per issued password-reset link. Only the hash is stored, mirroring
+/// `RefreshToken`: a database leak cannot be replayed against the API. A token
+/// is single-use (`usedAt`) and short-lived (`expiresAt`).
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.VarChar(255)
+  expiresAt DateTime
+  usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -354,6 +426,8 @@ model Supplier {
   deletedAt      DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  purchaseOrders PurchaseOrder[]
 
   @@unique([organizationId, supplierCode])
   @@index([organizationId])
@@ -427,11 +501,13 @@ model Product {
   brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: Restrict)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  inventory      Inventory?
+  inventory      Inventory[]
   stockMovements StockMovement[]
   orderItems     OrderItem[]
   returnItems    ReturnItem[]
   repairItems    RepairItem[]
+  purchaseOrderItems PurchaseOrderItem[]
+  stockTransferItems StockTransferItem[]
 
   @@unique([organizationId, sku])
   @@unique([organizationId, barcode])
@@ -448,13 +524,70 @@ model Product {
 // Inventory
 // ---------------------------------------------------------------------------
 
+/// A physical place stock lives - a store, warehouse or service centre.
+/// Introduced as the foundation for Phase 33 (Stock Transfers); until that
+/// phase exists, every organization has exactly one Location (`isDefault =
+/// true`) and every stock-moving call site resolves it internally rather than
+/// accepting a caller-supplied locationId.
+model Location {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  organizationId String       @db.Uuid
+  name           String       @db.VarChar(200)
+  type           LocationType @default(STORE)
+  address        String?      @db.VarChar(500)
+  /// Exactly one non-deleted Location per organization may be true - enforced
+  /// by a partial unique index in the migration, not by the schema DSL (Prisma
+  /// cannot express a partial unique constraint declaratively).
+  isDefault      Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  inventory      Inventory[]
+  stockMovements StockMovement[]
+  userAccess     UserLocationAccess[]
+  transfersFrom  StockTransfer[]      @relation("StockTransferSource")
+  transfersTo    StockTransfer[]      @relation("StockTransferDestination")
+
+  @@index([organizationId])
+  @@index([deletedAt])
+}
+
+/// Restricts a user to a subset of their organization's locations.
+///
+/// Semantics: empty = unrestricted (the user may access every location in
+/// their org), non-empty = allow-list (the user may access only the listed
+/// locations). This is the inverse of what "empty list" usually means for a
+/// permission table - an admin adding the first restriction row for a user
+/// changes that user from unrestricted to restricted; there is no separate
+/// "no access" state. ADMIN role always bypasses this restriction regardless
+/// of rows present, the same way the outer organization boundary can't be
+/// bypassed by anyone.
+model UserLocationAccess {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  userId     String   @db.Uuid
+  locationId String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, locationId])
+  @@index([locationId])
+}
+
 /// Current stock level, kept separate from the product definition so a price
 /// edit never contends with a sale. Updated only inside a transaction that
-/// also writes a StockMovement.
+/// also writes a StockMovement. Per-location: the same product has one row
+/// per Location it has ever held stock at.
 model Inventory {
   id               String   @id @default(uuid(7)) @db.Uuid
   organizationId   String   @db.Uuid
-  productId        String   @unique @db.Uuid
+  productId        String   @db.Uuid
+  locationId       String   @db.Uuid
   quantity         Int      @default(0)
   reservedQuantity Int      @default(0)
   createdAt        DateTime @default(now())
@@ -462,9 +595,13 @@ model Inventory {
 
   product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Restrict: a location holding stock cannot be deleted out from under it.
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
+  @@unique([productId, locationId])
   @@index([organizationId])
   @@index([quantity])
+  @@index([locationId])
 }
 
 /// Append-only ledger. Every change to Inventory.quantity has exactly one row
@@ -473,6 +610,7 @@ model StockMovement {
   id               String             @id @default(uuid(7)) @db.Uuid
   organizationId   String             @db.Uuid
   productId        String             @db.Uuid
+  locationId       String             @db.Uuid
   type             StockMovementType
   quantity         Int
   previousQuantity Int
@@ -488,6 +626,8 @@ model StockMovement {
   // Restrict keeps the ledger attributable: a user with movements cannot be
   // hard-deleted, only deactivated.
   createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  // Restrict: a location with recorded movements cannot be deleted out from under them.
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Restrict)
 
   @@index([organizationId])
   @@index([productId, createdAt])
@@ -495,6 +635,7 @@ model StockMovement {
   @@index([referenceType, referenceId])
   @@index([createdById])
   @@index([createdAt])
+  @@index([locationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -558,6 +699,163 @@ model OrderItem {
   returnItems ReturnItem[]
 
   @@unique([orderId, productId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Purchasing
+// ---------------------------------------------------------------------------
+
+/// The purchasing counterpart of Order: DRAFT -> APPROVED -> ORDERED, then
+/// receiving moves it to PARTIALLY_RECEIVED/RECEIVED as GoodsReceipts land
+/// against it. Cancellable from DRAFT/APPROVED/ORDERED only - never once any
+/// receiving has happened, mirroring how Order.cancel refuses once paid.
+model PurchaseOrder {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  organizationId String              @db.Uuid
+  poNumber       String              @db.VarChar(32)
+  supplierId     String              @db.Uuid
+  status         PurchaseOrderStatus @default(DRAFT)
+  subtotal       Decimal             @default(0) @db.Decimal(14, 2)
+  discount       Decimal             @default(0) @db.Decimal(14, 2)
+  tax            Decimal             @default(0) @db.Decimal(14, 2)
+  shipping       Decimal             @default(0) @db.Decimal(14, 2)
+  total          Decimal             @default(0) @db.Decimal(14, 2)
+  expectedDate   DateTime?
+  notes          String?
+  createdById    String              @db.Uuid
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  supplier     Supplier     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  items         PurchaseOrderItem[]
+  goodsReceipts GoodsReceipt[]
+
+  @@unique([organizationId, poNumber])
+  @@index([organizationId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model PurchaseOrderItem {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  purchaseOrderId String   @db.Uuid
+  productId       String   @db.Uuid
+  quantity        Int
+  /// What we pay the supplier - distinct from Product.sellingPrice, which is what
+  /// we charge a customer. Captured at order time so a later cost change cannot
+  /// rewrite a purchase that already happened.
+  unitCost        Decimal  @db.Decimal(14, 2)
+  discount        Decimal  @default(0) @db.Decimal(14, 2)
+  total           Decimal  @db.Decimal(14, 2)
+  /// Denormalized running total of GoodsReceiptItem.quantityReceived against this
+  /// line, updated by the same conditional UPDATE that admits a receipt - the same
+  /// pattern as Inventory.reservedQuantity - so two simultaneous receipts racing to
+  /// receive more than what remains outstanding cannot both succeed.
+  receivedQuantity Int     @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  goodsReceiptItems GoodsReceiptItem[]
+
+  @@unique([purchaseOrderId, productId])
+  @@index([productId])
+}
+
+/// One delivery against a PurchaseOrder. Its lines are what actually move
+/// stock - creating a GoodsReceipt, the StockMovements it causes and the
+/// PurchaseOrder status re-evaluation all happen in one transaction.
+model GoodsReceipt {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  organizationId  String   @db.Uuid
+  grNumber        String   @db.VarChar(32)
+  purchaseOrderId String   @db.Uuid
+  note            String?
+  createdById     String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  createdBy     User          @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  items GoodsReceiptItem[]
+
+  @@unique([organizationId, grNumber])
+  @@index([organizationId])
+  @@index([purchaseOrderId])
+  @@index([createdAt])
+}
+
+model GoodsReceiptItem {
+  id                  String   @id @default(uuid(7)) @db.Uuid
+  goodsReceiptId      String   @db.Uuid
+  purchaseOrderItemId String   @db.Uuid
+  quantityReceived    Int
+  createdAt           DateTime @default(now())
+
+  goodsReceipt      GoodsReceipt      @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  purchaseOrderItem PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Restrict)
+
+  @@index([goodsReceiptId])
+  @@index([purchaseOrderItemId])
+}
+
+/// Moves stock between two of the organization's Locations. DRAFT lines are
+/// free to edit; APPROVED reserves at the source; IN_TRANSIT consumes at the
+/// source; COMPLETED restores at the destination. Two StockMovement rows
+/// exist per line once COMPLETED (one TRANSFER_OUT, one TRANSFER_IN), and the
+/// combined quantity across both locations is unchanged throughout.
+model StockTransfer {
+  id                    String               @id @default(uuid(7)) @db.Uuid
+  organizationId        String               @db.Uuid
+  transferNumber        String               @db.VarChar(32)
+  sourceLocationId      String               @db.Uuid
+  destinationLocationId String               @db.Uuid
+  status                StockTransferStatus  @default(DRAFT)
+  notes                 String?
+  createdById           String               @db.Uuid
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy         User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  // Restrict: a location with transfer history cannot be deleted out from under it.
+  sourceLocation      Location @relation("StockTransferSource", fields: [sourceLocationId], references: [id], onDelete: Restrict)
+  destinationLocation Location @relation("StockTransferDestination", fields: [destinationLocationId], references: [id], onDelete: Restrict)
+
+  items StockTransferItem[]
+
+  @@unique([organizationId, transferNumber])
+  @@index([organizationId])
+  @@index([sourceLocationId])
+  @@index([destinationLocationId])
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model StockTransferItem {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  transferId String   @db.Uuid
+  productId  String   @db.Uuid
+  /// The amount requested/shipped - no partial-shipment concept, a transfer
+  /// ships and receives its full requested quantity as one atomic step each.
+  quantity   Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([transferId, productId])
   @@index([productId])
 }
 

@@ -44,24 +44,52 @@ export interface ConsumptionContext {
 }
 
 /**
+ * Resolves the current organization's one default Location.
+ *
+ * Phase 32 makes `Inventory`/`StockMovement` genuinely per-location in the
+ * schema, but until Phase 33 (Stock Transfers) exists there is no way to
+ * choose between locations meaningfully - every organization has exactly one
+ * `Location` (`isDefault = true`), auto-created on registration and backfilled
+ * for existing orgs. Every caller in this file resolves it fresh rather than
+ * caching it: these are already multi-query transactions, so one more read
+ * costs nothing, and it keeps this function the single place that would need
+ * to change once a caller can pick a location.
+ */
+export async function getDefaultLocationId(tx: Prisma.TransactionClient | TenantTransactionClient): Promise<string> {
+  const location = await tx.location.findFirstOrThrow({
+    where: { organizationId: getCurrentOrgId(), isDefault: true, deletedAt: null },
+    select: { id: true },
+  });
+
+  return location.id;
+}
+
+/**
  * Claims stock for a document that has been committed to.
  *
  * The guard is `quantity - reservedQuantity >= n`: a unit already promised
  * elsewhere cannot be promised again, so two documents committed at the same
  * moment cannot both claim the last one.
  */
-export async function reserveStock(tx: Prisma.TransactionClient | TenantTransactionClient, lines: readonly StockLine[]): Promise<void> {
+export async function reserveStock(
+  tx: Prisma.TransactionClient | TenantTransactionClient,
+  lines: readonly StockLine[],
+  locationId?: string,
+): Promise<void> {
+  const resolvedLocationId = locationId ?? (await getDefaultLocationId(tx));
+
   for (const line of inProductOrder(lines)) {
     const affected = await tx.$executeRaw`
       UPDATE "Inventory"
       SET "reservedQuantity" = "reservedQuantity" + ${line.quantity}, "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
         AND "organizationId" = ${getCurrentOrgId()}::uuid
+        AND "locationId" = ${resolvedLocationId}::uuid
         AND "quantity" - "reservedQuantity" >= ${line.quantity}
     `;
 
     if (affected === 0) {
-      throw await insufficientStock(tx, line);
+      throw await insufficientStock(tx, line, resolvedLocationId);
     }
   }
 }
@@ -79,7 +107,9 @@ export async function consumeStock(
   tx: Prisma.TransactionClient | TenantTransactionClient,
   lines: readonly StockLine[],
   context: ConsumptionContext,
+  locationId?: string,
 ): Promise<void> {
+  const resolvedLocationId = locationId ?? (await getDefaultLocationId(tx));
   const movements: Prisma.StockMovementCreateManyInput[] = [];
 
   for (const line of inProductOrder(lines)) {
@@ -90,6 +120,7 @@ export async function consumeStock(
           "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
         AND "organizationId" = ${getCurrentOrgId()}::uuid
+        AND "locationId" = ${resolvedLocationId}::uuid
         AND "quantity" >= ${line.quantity}
         AND "reservedQuantity" >= ${line.quantity}
       RETURNING "quantity"
@@ -98,12 +129,13 @@ export async function consumeStock(
     const row = rows[0];
 
     if (row === undefined) {
-      throw await insufficientStock(tx, line);
+      throw await insufficientStock(tx, line, resolvedLocationId);
     }
 
     movements.push({
       organizationId: getCurrentOrgId(),
       productId: line.productId,
+      locationId: resolvedLocationId,
       type: context.type,
       quantity: line.quantity,
       previousQuantity: row.quantity + line.quantity,
@@ -130,7 +162,9 @@ export async function restoreStock(
   tx: Prisma.TransactionClient | TenantTransactionClient,
   lines: readonly StockLine[],
   context: ConsumptionContext,
+  locationId?: string,
 ): Promise<void> {
+  const resolvedLocationId = locationId ?? (await getDefaultLocationId(tx));
   const movements: Prisma.StockMovementCreateManyInput[] = [];
 
   for (const line of inProductOrder(lines)) {
@@ -139,6 +173,7 @@ export async function restoreStock(
       SET "quantity" = "quantity" + ${line.quantity}, "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
         AND "organizationId" = ${getCurrentOrgId()}::uuid
+        AND "locationId" = ${resolvedLocationId}::uuid
       RETURNING "quantity"
     `;
 
@@ -156,6 +191,7 @@ export async function restoreStock(
     movements.push({
       organizationId: getCurrentOrgId(),
       productId: line.productId,
+      locationId: resolvedLocationId,
       type: context.type,
       quantity: line.quantity,
       previousQuantity: row.quantity - line.quantity,
@@ -170,13 +206,20 @@ export async function restoreStock(
 }
 
 /** Gives up a claim, leaving the quantity on hand untouched. */
-export async function releaseStock(tx: Prisma.TransactionClient | TenantTransactionClient, lines: readonly StockLine[]): Promise<void> {
+export async function releaseStock(
+  tx: Prisma.TransactionClient | TenantTransactionClient,
+  lines: readonly StockLine[],
+  locationId?: string,
+): Promise<void> {
+  const resolvedLocationId = locationId ?? (await getDefaultLocationId(tx));
+
   for (const line of inProductOrder(lines)) {
     const affected = await tx.$executeRaw`
       UPDATE "Inventory"
       SET "reservedQuantity" = "reservedQuantity" - ${line.quantity}, "updatedAt" = NOW()
       WHERE "productId" = ${line.productId}::uuid
         AND "organizationId" = ${getCurrentOrgId()}::uuid
+        AND "locationId" = ${resolvedLocationId}::uuid
         AND "reservedQuantity" >= ${line.quantity}
     `;
 
@@ -212,9 +255,9 @@ function inProductOrder(lines: readonly StockLine[]): StockLine[] {
 }
 
 /** Reached only on the failure path, so the extra read costs nothing normally. */
-async function insufficientStock(tx: Prisma.TransactionClient | TenantTransactionClient, line: StockLine): Promise<ConflictException> {
+async function insufficientStock(tx: Prisma.TransactionClient | TenantTransactionClient, line: StockLine, locationId: string): Promise<ConflictException> {
   const inventory = await tx.inventory.findUnique({
-    where: { productId: line.productId, organizationId: getCurrentOrgId() },
+    where: { productId_locationId: { productId: line.productId, locationId }, organizationId: getCurrentOrgId() },
     select: { quantity: true, reservedQuantity: true },
   });
 

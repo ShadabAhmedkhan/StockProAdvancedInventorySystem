@@ -3,7 +3,7 @@ import type { Prisma } from '../../generated/prisma/client';
 import { StockMovementType, StockReferenceType } from '../../generated/prisma/enums';
 import { firstCallArg } from '../testing/mock-args';
 import * as tenantContext from '../tenant/tenant-context';
-import { consumeStock, releaseStock, reserveStock, type ConsumptionContext, type StockLine } from './stock-operations';
+import { consumeStock, releaseStock, reserveStock, restoreStock, type ConsumptionContext, type StockLine } from './stock-operations';
 
 const ORDER_ID = '00000000-0000-4000-8000-00000000000a';
 const USER_ID = '00000000-0000-4000-8000-0000000000ff';
@@ -29,7 +29,10 @@ describe('stock operations', () => {
   let queryRaw: jest.Mock;
   let inventoryFindUnique: jest.Mock;
   let createMany: jest.Mock;
+  let locationFindFirstOrThrow: jest.Mock;
   let tx: Prisma.TransactionClient;
+
+  const LOCATION_ID = '99999999-0000-4000-8000-000000000009';
 
   /** The statements sent, in the order they were sent. */
   function rawCalls(mock: jest.Mock): RawCall[] {
@@ -50,12 +53,14 @@ describe('stock operations', () => {
     queryRaw = jest.fn(() => Promise.resolve([{ quantity: 4 }]));
     inventoryFindUnique = jest.fn(() => Promise.resolve({ quantity: 1, reservedQuantity: 0 }));
     createMany = jest.fn(() => Promise.resolve({ count: 2 }));
+    locationFindFirstOrThrow = jest.fn(() => Promise.resolve({ id: LOCATION_ID }));
 
     tx = {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
       inventory: { findUnique: inventoryFindUnique },
       stockMovement: { createMany },
+      location: { findFirstOrThrow: locationFindFirstOrThrow },
     } as unknown as Prisma.TransactionClient;
   });
 
@@ -65,7 +70,7 @@ describe('stock operations', () => {
 
       const [call] = rawCalls(executeRaw);
       expect(call?.sql).toContain('"reservedQuantity" = "reservedQuantity" + ');
-      expect(call?.values).toEqual([3, EARLIER.productId, 'org-1', 3]);
+      expect(call?.values).toEqual([3, EARLIER.productId, 'org-1', LOCATION_ID, 3]);
     });
 
     it('guards on what is unreserved, not on what is on the shelf', async () => {
@@ -121,6 +126,7 @@ describe('stock operations', () => {
       expect(data[0]).toEqual({
         organizationId: 'org-1',
         productId: EARLIER.productId,
+        locationId: LOCATION_ID,
         type: StockMovementType.SALE,
         quantity: 3,
         previousQuantity: 7,
@@ -172,6 +178,54 @@ describe('stock operations', () => {
       await releaseStock(tx, [LATER, EARLIER]);
 
       expect(productOrder(executeRaw)).toEqual([EARLIER.productId, LATER.productId]);
+    });
+  });
+
+  describe('optional locationId (Phase 33 - Stock Transfers)', () => {
+    const OTHER_LOCATION_ID = '88888888-0000-4000-8000-000000000008';
+
+    it('reserveStock: falls back to the default location when omitted', async () => {
+      await reserveStock(tx, [EARLIER]);
+
+      expect(locationFindFirstOrThrow).toHaveBeenCalled();
+      expect(rawCalls(executeRaw)[0]?.values).toContain(LOCATION_ID);
+    });
+
+    it('reserveStock: uses the explicit location and never resolves the default', async () => {
+      await reserveStock(tx, [EARLIER], OTHER_LOCATION_ID);
+
+      expect(locationFindFirstOrThrow).not.toHaveBeenCalled();
+      expect(rawCalls(executeRaw)[0]?.values).toContain(OTHER_LOCATION_ID);
+    });
+
+    it('consumeStock: uses the explicit location for both the guard and the movement row', async () => {
+      await consumeStock(tx, [EARLIER], SALE_CONTEXT, OTHER_LOCATION_ID);
+
+      expect(locationFindFirstOrThrow).not.toHaveBeenCalled();
+      expect(rawCalls(queryRaw)[0]?.values).toContain(OTHER_LOCATION_ID);
+      const { data } = firstCallArg(createMany) as { data: Record<string, unknown>[] };
+      expect(data[0]?.locationId).toBe(OTHER_LOCATION_ID);
+    });
+
+    it('restoreStock: falls back to the default location when omitted', async () => {
+      await restoreStock(tx, [EARLIER], SALE_CONTEXT);
+
+      expect(locationFindFirstOrThrow).toHaveBeenCalled();
+    });
+
+    it('restoreStock: uses the explicit location', async () => {
+      await restoreStock(tx, [EARLIER], SALE_CONTEXT, OTHER_LOCATION_ID);
+
+      expect(locationFindFirstOrThrow).not.toHaveBeenCalled();
+      const { data } = firstCallArg(createMany) as { data: Record<string, unknown>[] };
+      expect(data[0]?.locationId).toBe(OTHER_LOCATION_ID);
+    });
+
+    it('releaseStock: uses the explicit location', async () => {
+      await releaseStock(tx, [EARLIER], OTHER_LOCATION_ID);
+
+      expect(locationFindFirstOrThrow).not.toHaveBeenCalled();
+      expect(rawCalls(executeRaw)[0]?.values).toContain(OTHER_LOCATION_ID);
     });
   });
 });

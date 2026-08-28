@@ -34,7 +34,7 @@ test.describe('returns', () => {
     const beforeSale = await readQuantityOnCurrentPage(page);
 
     // Sell it first, so there is a completed order to return against.
-    await page.getByRole('link', { name: 'Orders' }).click();
+    await page.getByRole('link', { name: 'Orders', exact: true }).click();
     await page.getByRole('button', { name: 'New sale' }).click();
     await page.waitForURL('**/dashboard/orders/*');
     await page.getByPlaceholder('Search products by SKU or name to add a line').fill(PRODUCT_SKU);

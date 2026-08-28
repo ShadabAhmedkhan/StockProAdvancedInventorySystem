@@ -17,6 +17,21 @@ function isApiFieldError(value: unknown): value is ApiFieldError {
   return typeof value.field === 'string' && isStringArray(value.constraints);
 }
 
+/**
+ * Node middleware (body-parser, and anything following its convention) signals
+ * a client-caused failure with a plain `Error` carrying a numeric `status` or
+ * `statusCode`, rather than an `HttpException` - it runs ahead of Nest's own
+ * pipeline, so it never has the chance to throw one. A request body over the
+ * configured size limit is the case that actually reaches this in practice.
+ */
+function readMiddlewareStatus(exception: unknown): number | undefined {
+  if (!(exception instanceof Error)) {
+    return undefined;
+  }
+  const status = 'status' in exception ? exception.status : 'statusCode' in exception ? exception.statusCode : undefined;
+  return typeof status === 'number' && status >= 400 && status < 500 ? status : undefined;
+}
+
 /** Reads `code` from an HttpException payload, ignoring anything unrecognised. */
 function readCode(payload: object): ErrorCode | undefined {
   if (!('code' in payload)) {
@@ -98,6 +113,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code: details.code ?? errorCodeForStatus(statusCode),
         message: details.message ?? exception.message,
         ...(details.errors === undefined ? {} : { errors: details.errors }),
+        requestId,
+        path,
+        timestamp,
+      };
+    }
+
+    const middlewareStatus = readMiddlewareStatus(exception);
+    if (middlewareStatus !== undefined) {
+      return {
+        statusCode: middlewareStatus,
+        code: errorCodeForStatus(middlewareStatus),
+        message: (exception as Error).message,
         requestId,
         path,
         timestamp,

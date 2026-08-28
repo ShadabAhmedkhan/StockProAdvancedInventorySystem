@@ -26,6 +26,9 @@ describe('StockService', () => {
   let movementCount: jest.Mock;
   let executeRaw: jest.Mock;
   let transaction: jest.Mock;
+  let locationFindFirstOrThrow: jest.Mock;
+
+  const LOCATION_ID = '99999999-0000-4000-8000-000000000009';
 
   beforeEach(async () => {
     jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
@@ -35,6 +38,7 @@ describe('StockService', () => {
     movementCreate = jest.fn(() => Promise.resolve({ id: 'movement-1' }));
     movementFindMany = jest.fn(() => Promise.resolve([]));
     movementCount = jest.fn(() => Promise.resolve(0));
+    locationFindFirstOrThrow = jest.fn(() => Promise.resolve({ id: LOCATION_ID }));
     // The conditional UPDATE reports how many rows it matched.
     executeRaw = jest.fn(() => Promise.resolve(1));
 
@@ -42,6 +46,7 @@ describe('StockService', () => {
       product: { findUnique: productFindUnique },
       inventory: { findUnique: inventoryFindUnique, findUniqueOrThrow: inventoryFindUniqueOrThrow },
       stockMovement: { create: movementCreate, findMany: movementFindMany, count: movementCount },
+      location: { findFirstOrThrow: locationFindFirstOrThrow },
       $executeRaw: executeRaw,
     };
 

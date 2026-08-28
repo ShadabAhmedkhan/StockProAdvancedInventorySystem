@@ -5,16 +5,15 @@ import { AlertTriangle, Boxes, DollarSign, Package } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
 import { cn } from '@/lib/utils';
 import { stockApi } from '@/features/products/api';
 import { StockAdjustDialog } from '@/features/products/components/stock-adjust-dialog';
 import { StockStatusBadge } from '@/features/products/components/stock-status-badge';
-import type { StockLevel } from '@/features/products/types';
+import type { StockLevel, StockMovement } from '@/features/products/types';
 import { useAuth } from '@/hooks/use-auth';
-import { errorMessage } from '@/lib/error-message';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { isInboundMovement, STOCK_MOVEMENT_LABELS } from '@/lib/stock-movement-labels';
 
@@ -147,6 +146,38 @@ function SummaryCard({
   );
 }
 
+function stockLevelColumns(canAdjust: boolean, setAdjusting: (level: StockLevel) => void): DataTableColumn<StockLevel>[] {
+  return [
+    { key: 'sku', label: 'SKU', render: (level) => <span className="font-mono text-xs">{level.sku}</span> },
+    { key: 'name', label: 'Name', render: (level) => level.name },
+    { key: 'onHand', label: 'On hand', align: 'right', render: (level) => <span className="tabular-nums">{level.quantity}</span> },
+    { key: 'reserved', label: 'Reserved', align: 'right', render: (level) => <span className="tabular-nums">{level.reservedQuantity}</span> },
+    { key: 'available', label: 'Available', align: 'right', render: (level) => <span className="tabular-nums">{level.availableQuantity}</span> },
+    { key: 'reorderAt', label: 'Reorder at', align: 'right', render: (level) => <span className="tabular-nums">{level.minimumStock}</span> },
+    { key: 'status', label: 'Status', render: (level) => <StockStatusBadge status={level.stockStatus} /> },
+    ...(canAdjust
+      ? [
+          {
+            key: 'actions',
+            label: 'Actions',
+            align: 'right' as const,
+            render: (level: StockLevel) => (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setAdjusting(level);
+                }}
+              >
+                Adjust
+              </Button>
+            ),
+          },
+        ]
+      : []),
+  ];
+}
+
 function StockLevelsTab({ canAdjust }: { canAdjust: boolean }): React.JSX.Element {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -201,95 +232,20 @@ function StockLevelsTab({ canAdjust }: { canAdjust: boolean }): React.JSX.Elemen
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">SKU</th>
-                    <th className="p-3 font-medium">Name</th>
-                    <th className="p-3 text-right font-medium">On hand</th>
-                    <th className="p-3 text-right font-medium">Reserved</th>
-                    <th className="p-3 text-right font-medium">Available</th>
-                    <th className="p-3 text-right font-medium">Reorder at</th>
-                    <th className="p-3 font-medium">Status</th>
-                    {canAdjust && <th className="p-3 text-right font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="p-4 text-center text-muted-foreground">
-                        No stock records found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((level) => (
-                    <tr key={level.productId} className="border-b border-border last:border-0">
-                      <td className="p-3 font-mono text-xs">{level.sku}</td>
-                      <td className="p-3">{level.name}</td>
-                      <td className="p-3 text-right tabular-nums">{level.quantity}</td>
-                      <td className="p-3 text-right tabular-nums">{level.reservedQuantity}</td>
-                      <td className="p-3 text-right tabular-nums">{level.availableQuantity}</td>
-                      <td className="p-3 text-right tabular-nums">{level.minimumStock}</td>
-                      <td className="p-3">
-                        <StockStatusBadge status={level.stockStatus} />
-                      </td>
-                      {canAdjust && (
-                        <td className="p-3 text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setAdjusting(level);
-                            }}
-                          >
-                            Adjust
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={stockLevelColumns(canAdjust, setAdjusting)}
+        rows={data?.items ?? []}
+        rowKey={(level) => level.productId}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No stock records found."
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
 
       <StockAdjustDialog
         open={adjusting !== null}
@@ -307,6 +263,43 @@ function StockLevelsTab({ canAdjust }: { canAdjust: boolean }): React.JSX.Elemen
   );
 }
 
+const MOVEMENT_COLUMNS: DataTableColumn<StockMovement>[] = [
+  { key: 'date', label: 'Date', render: (movement) => <span className="text-muted-foreground">{formatDateTime(movement.createdAt)}</span> },
+  {
+    key: 'product',
+    label: 'Product',
+    render: (movement) => (
+      <>
+        {movement.product.name}
+        <span className="ml-1 font-mono text-xs text-muted-foreground">{movement.product.sku}</span>
+      </>
+    ),
+  },
+  { key: 'type', label: 'Type', render: (movement) => <span className="text-muted-foreground">{STOCK_MOVEMENT_LABELS[movement.type]}</span> },
+  {
+    key: 'quantity',
+    label: 'Quantity',
+    align: 'right',
+    render: (movement) => (
+      <span className={cn('tabular-nums', isInboundMovement(movement.type) ? 'text-success' : 'text-danger')}>
+        {isInboundMovement(movement.type) ? '+' : '-'}
+        {movement.quantity}
+      </span>
+    ),
+  },
+  { key: 'newTotal', label: 'New total', align: 'right', render: (movement) => <span className="tabular-nums">{movement.newQuantity}</span> },
+  {
+    key: 'by',
+    label: 'By',
+    render: (movement) => (
+      <span className="text-muted-foreground">
+        {movement.createdBy.firstName} {movement.createdBy.lastName}
+      </span>
+    ),
+  },
+  { key: 'note', label: 'Note', render: (movement) => <span className="text-muted-foreground">{movement.note ?? '-'}</span> },
+];
+
 function MovementsTab(): React.JSX.Element {
   const [page, setPage] = useState(1);
   const { data, isLoading, isError, error } = useQuery({
@@ -315,91 +308,19 @@ function MovementsTab(): React.JSX.Element {
   });
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Date</th>
-                    <th className="p-3 font-medium">Product</th>
-                    <th className="p-3 font-medium">Type</th>
-                    <th className="p-3 text-right font-medium">Quantity</th>
-                    <th className="p-3 text-right font-medium">New total</th>
-                    <th className="p-3 font-medium">By</th>
-                    <th className="p-3 font-medium">Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="p-4 text-center text-muted-foreground">
-                        No stock movements yet.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((movement) => {
-                    const inbound = isInboundMovement(movement.type);
-                    return (
-                      <tr key={movement.id} className="border-b border-border last:border-0">
-                        <td className="p-3 text-muted-foreground">{formatDateTime(movement.createdAt)}</td>
-                        <td className="p-3">
-                          {movement.product.name}
-                          <span className="ml-1 font-mono text-xs text-muted-foreground">{movement.product.sku}</span>
-                        </td>
-                        <td className="p-3 text-muted-foreground">{STOCK_MOVEMENT_LABELS[movement.type]}</td>
-                        <td className={cn('p-3 text-right tabular-nums', inbound ? 'text-success' : 'text-danger')}>
-                          {inbound ? '+' : '-'}
-                          {movement.quantity}
-                        </td>
-                        <td className="p-3 text-right tabular-nums">{movement.newQuantity}</td>
-                        <td className="p-3 text-muted-foreground">
-                          {movement.createdBy.firstName} {movement.createdBy.lastName}
-                        </td>
-                        <td className="p-3 text-muted-foreground">{movement.note ?? '-'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
+    <DataTable
+      columns={MOVEMENT_COLUMNS}
+      rows={data?.items ?? []}
+      rowKey={(movement) => movement.id}
+      isLoading={isLoading}
+      isError={isError}
+      error={error}
+      emptyMessage="No stock movements yet."
+      pagination={
+        data === undefined
+          ? undefined
+          : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+      }
+    />
   );
 }

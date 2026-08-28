@@ -3,6 +3,7 @@
 import { Boxes } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
+import { CommandPalette } from '@/components/command-palette';
 import { DashboardNav } from '@/components/dashboard-nav';
 import { LogoutButton } from '@/components/logout-button';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -44,6 +45,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           Stock Pro
         </span>
         <div className="flex items-center gap-3">
+          <CommandPalette />
           <ThemeToggle />
           <div className="flex items-center gap-2 rounded-full border border-border bg-muted py-1 pl-1 pr-3 text-sm">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">

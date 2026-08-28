@@ -178,7 +178,7 @@ describe('Returns concurrency (e2e)', () => {
     ]);
     const statuses = settled.map((response) => response.status);
 
-    const inventory = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const inventory = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
     const payments = await context.prisma.payment.count({ where: { returnId } });
     const movements = await context.prisma.stockMovement.count({ where: { referenceId: returnId, type: StockMovementType.RETURN_IN } });
 
@@ -219,7 +219,7 @@ describe('Returns concurrency (e2e)', () => {
     // Every unit comes back into stock, but only the 30.00 that arrived goes
     // back out - never the full 60.00 of goods.
     expect(handedBack.toFixed(2)).toBe('30.00');
-    expect((await context.prisma.inventory.findUniqueOrThrow({ where: { productId } })).quantity).toBe(60);
+    expect((await context.prisma.inventory.findFirstOrThrow({ where: { productId } })).quantity).toBe(60);
   });
 
   it('marks the order refunded exactly once when returns complete together', async () => {
@@ -251,7 +251,7 @@ describe('Returns concurrency (e2e)', () => {
 
     const movements = await context.prisma.stockMovement.findMany({ where: { productId, type: StockMovementType.RETURN_IN } });
     const restored = movements.reduce((sum, movement) => sum + movement.quantity, 0);
-    const inventory = await context.prisma.inventory.findUniqueOrThrow({ where: { productId } });
+    const inventory = await context.prisma.inventory.findFirstOrThrow({ where: { productId } });
 
     expect(restored).toBe(10);
     expect(inventory.quantity).toBe(100);

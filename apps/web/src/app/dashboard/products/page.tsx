@@ -4,11 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { DataTable, nextSortState, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
-import { brandsApi, categoriesApi, productsApi } from '@/features/products/api';
+import { brandsApi, categoriesApi, productsApi, type ProductSortField } from '@/features/products/api';
 import { ProductFormDialog } from '@/features/products/components/product-form-dialog';
 import { StockStatusBadge } from '@/features/products/components/stock-status-badge';
 import { stockStatusFor } from '@/features/products/labels';
@@ -32,6 +31,8 @@ export default function ProductsPage(): React.JSX.Element {
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [sortBy, setSortBy] = useState<ProductSortField>('createdAt');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -49,8 +50,8 @@ export default function ProductsPage(): React.JSX.Element {
   const brands = brandsQuery.data?.items ?? [];
 
   const productsQuery = useQuery({
-    queryKey: ['products', page, search, categoryId, brandId, includeDeleted],
-    queryFn: () => productsApi.list({ page, search, categoryId: categoryId || undefined, brandId: brandId || undefined, includeDeleted }),
+    queryKey: ['products', page, search, categoryId, brandId, includeDeleted, sortBy, sortOrder],
+    queryFn: () => productsApi.list({ page, search, categoryId: categoryId || undefined, brandId: brandId || undefined, includeDeleted, sortBy, sortOrder }),
   });
 
   const invalidate = (): Promise<void> => queryClient.invalidateQueries({ queryKey: ['products'] });
@@ -92,6 +93,65 @@ export default function ProductsPage(): React.JSX.Element {
   }
 
   const data = productsQuery.data;
+
+  const columns: DataTableColumn<Product>[] = [
+    { key: 'sku', label: 'SKU', sortable: true, render: (product) => <span className="font-mono text-xs">{product.sku}</span> },
+    {
+      key: 'name',
+      label: 'Name',
+      sortable: true,
+      render: (product) => (
+        <>
+          {product.name}
+          {!product.isActive && <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>}
+          {product.deletedAt !== null && <span className="ml-2 text-xs text-muted-foreground">(deleted)</span>}
+        </>
+      ),
+    },
+    { key: 'category', label: 'Category', render: (product) => <span className="text-muted-foreground">{product.category.name}</span> },
+    { key: 'brand', label: 'Brand', render: (product) => <span className="text-muted-foreground">{product.brand?.name ?? '-'}</span> },
+    { key: 'costPrice', label: 'Cost', align: 'right', sortable: true, render: (product) => <span className="tabular-nums">{formatCurrency(product.costPrice)}</span> },
+    { key: 'sellingPrice', label: 'Price', align: 'right', sortable: true, render: (product) => <span className="tabular-nums">{formatCurrency(product.sellingPrice)}</span> },
+    { key: 'onHand', label: 'On hand', align: 'right', render: (product) => <span className="tabular-nums">{product.inventory?.quantity ?? 0}</span> },
+    {
+      key: 'stock',
+      label: 'Stock',
+      render: (product) => <StockStatusBadge status={stockStatusFor(product.inventory?.quantity ?? 0, product.minimumStock)} />,
+    },
+    ...(canWrite
+      ? [
+          {
+            key: 'actions',
+            label: 'Actions',
+            align: 'right' as const,
+            render: (product: Product) => (
+              <div className="flex justify-end gap-2">
+                {product.deletedAt === null && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      openEdit(product);
+                    }}
+                  >
+                    Edit
+                  </Button>
+                )}
+                {product.deletedAt === null ? (
+                  <Button variant="outline" size="sm" onClick={() => void handleRemove(product.id)}>
+                    Delete
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => void handleRestore(product.id)}>
+                    Restore
+                  </Button>
+                )}
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="space-y-4">
@@ -157,117 +217,35 @@ export default function ProductsPage(): React.JSX.Element {
 
       {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
-      <Card>
-        <CardContent className="p-0">
-          {productsQuery.isLoading && <TableSkeleton />}
-          {productsQuery.isError && <p className="p-4 text-sm text-danger">{errorMessage(productsQuery.error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">SKU</th>
-                    <th className="p-3 font-medium">Name</th>
-                    <th className="p-3 font-medium">Category</th>
-                    <th className="p-3 font-medium">Brand</th>
-                    <th className="p-3 text-right font-medium">Cost</th>
-                    <th className="p-3 text-right font-medium">Price</th>
-                    <th className="p-3 text-right font-medium">On hand</th>
-                    <th className="p-3 font-medium">Stock</th>
-                    {canWrite && <th className="p-3 text-right font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={9} className="p-4 text-center text-muted-foreground">
-                        No products found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((product) => {
-                    const quantity = product.inventory?.quantity ?? 0;
-                    return (
-                      <tr key={product.id} className="border-b border-border last:border-0">
-                        <td className="p-3 font-mono text-xs">{product.sku}</td>
-                        <td className="p-3">
-                          {product.name}
-                          {!product.isActive && <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>}
-                          {product.deletedAt !== null && <span className="ml-2 text-xs text-muted-foreground">(deleted)</span>}
-                        </td>
-                        <td className="p-3 text-muted-foreground">{product.category.name}</td>
-                        <td className="p-3 text-muted-foreground">{product.brand?.name ?? '-'}</td>
-                        <td className="p-3 text-right tabular-nums">{formatCurrency(product.costPrice)}</td>
-                        <td className="p-3 text-right tabular-nums">{formatCurrency(product.sellingPrice)}</td>
-                        <td className="p-3 text-right tabular-nums">{quantity}</td>
-                        <td className="p-3">
-                          <StockStatusBadge status={stockStatusFor(quantity, product.minimumStock)} />
-                        </td>
-                        {canWrite && (
-                          <td className="p-3 text-right">
-                            <div className="flex justify-end gap-2">
-                              {product.deletedAt === null && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    openEdit(product);
-                                  }}
-                                >
-                                  Edit
-                                </Button>
-                              )}
-                              {product.deletedAt === null ? (
-                                <Button variant="outline" size="sm" onClick={() => void handleRemove(product.id)}>
-                                  Delete
-                                </Button>
-                              ) : (
-                                <Button variant="outline" size="sm" onClick={() => void handleRestore(product.id)}>
-                                  Restore
-                                </Button>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={columns}
+        rows={data?.items ?? []}
+        rowKey={(product) => product.id}
+        isLoading={productsQuery.isLoading}
+        isError={productsQuery.isError}
+        error={productsQuery.error}
+        emptyMessage="No products found."
+        sort={{
+          sortBy,
+          sortOrder,
+          onSortChange: (columnKey) => {
+            const next = nextSortState({ sortBy, sortOrder }, columnKey);
+            setSortBy(next.sortBy as ProductSortField);
+            setSortOrder(next.sortOrder);
+            setPage(1);
+          },
+        }}
+        pagination={
+          data === undefined
+            ? undefined
+            : {
+                page: data.pagination.page,
+                totalPages: data.pagination.totalPages,
+                total: data.pagination.total,
+                onPageChange: setPage,
+              }
+        }
+      />
 
       <ProductFormDialog
         open={dialogOpen}

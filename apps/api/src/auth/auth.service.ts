@@ -3,15 +3,20 @@ import { ConflictException, ForbiddenException, Inject, Injectable, Unauthorized
 import type { ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuditService } from '../audit/audit.service';
+import { EmailService } from '../common/email/email.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { hashPassword, verifyPassword } from '../common/utils/password.util';
+import { appConfig } from '../config/app.config';
 import { jwtConfig } from '../config/jwt.config';
 import { AuditAction, AuditEntity, UserRole, UserStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthResult, PublicUser } from './dto/auth-response.dto';
+import type { ForgotPasswordDto } from './dto/forgot-password.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
+import type { ResetPasswordDto } from './dto/reset-password.dto';
+import { PasswordResetService } from './password-reset.service';
 import { RefreshTokenService, type IssuedRefreshToken, type RefreshTokenContext } from './refresh-token.service';
 
 /** Every field of a user that may leave the API. `passwordHash` is not among them. */
@@ -50,8 +55,11 @@ export class AuthService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly refreshTokens: RefreshTokenService,
+    private readonly passwordResets: PasswordResetService,
     private readonly auditService: AuditService,
+    private readonly emailService: EmailService,
     @Inject(jwtConfig.KEY) private readonly config: ConfigType<typeof jwtConfig>,
+    @Inject(appConfig.KEY) private readonly app: ConfigType<typeof appConfig>,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -83,6 +91,13 @@ export class AuthService implements OnModuleInit {
       const organization = await tx.organization.create({
         data: { name: dto.organizationName, subscriptionStatus: 'TRIALING', trialEndsAt },
         select: { id: true },
+      });
+
+      // Every organization gets exactly one default Location from the moment
+      // it exists, the same way its first user does - stock operations
+      // resolve it internally rather than accepting a caller-supplied one.
+      await tx.location.create({
+        data: { organizationId: organization.id, name: 'Main Location', type: 'STORE', isDefault: true },
       });
 
       return tx.user.create({
@@ -220,6 +235,74 @@ export class AuthService implements OnModuleInit {
     }
 
     return user;
+  }
+
+  /**
+   * Always resolves the same way regardless of whether the email is known,
+   * so a caller cannot use this endpoint to enumerate registered accounts. A
+   * matching, active account is emailed a one-hour reset link; anything else
+   * (unknown email, deactivated account) does nothing, silently.
+   */
+  async forgotPassword(dto: ForgotPasswordDto, context: RefreshTokenContext): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      select: { id: true, organizationId: true, status: true },
+    });
+
+    if (user?.status !== UserStatus.ACTIVE) {
+      return;
+    }
+
+    const issued = await this.passwordResets.issue(user.id);
+    const resetUrl = `${this.app.corsOrigins[0] ?? ''}/reset-password?token=${issued.token}`;
+
+    await this.emailService.send({
+      to: dto.email,
+      subject: 'Reset your Stock Pro password',
+      html: `<p>Follow this link to reset your password. It expires in one hour and can be used once.</p><p><a href="${resetUrl}">${resetUrl}</a></p>`,
+    });
+
+    await this.auditService.record({
+      userId: user.id,
+      action: AuditAction.PASSWORD_RESET_REQUESTED,
+      entity: AuditEntity.AUTH,
+      metadata: { email: dto.email },
+      ipAddress: context.ipAddress ?? null,
+      userAgent: context.userAgent ?? null,
+      organizationId: user.organizationId,
+    });
+  }
+
+  /**
+   * Spends a reset token: sets the new password, revokes every refresh
+   * session the account currently holds (a leaked password is assumed to
+   * have leaked alongside any active session), and audits the event.
+   */
+  async resetPassword(dto: ResetPasswordDto, context: RefreshTokenContext): Promise<void> {
+    const userId = await this.passwordResets.consume(dto.token);
+
+    if (userId === null) {
+      throw new UnauthorizedException({ code: ErrorCode.UNAUTHORIZED, message: 'Invalid or expired reset token' });
+    }
+
+    const passwordHash = await hashPassword(dto.password);
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+      select: { organizationId: true, email: true },
+    });
+
+    await this.refreshTokens.revokeAllForUser(userId);
+
+    await this.auditService.record({
+      userId,
+      action: AuditAction.PASSWORD_RESET_COMPLETED,
+      entity: AuditEntity.AUTH,
+      metadata: { email: user.email },
+      ipAddress: context.ipAddress ?? null,
+      userAgent: context.userAgent ?? null,
+      organizationId: user.organizationId,
+    });
   }
 
   private async startSession(user: PublicUser, context: RefreshTokenContext): Promise<AuthSession> {

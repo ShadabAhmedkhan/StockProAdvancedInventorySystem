@@ -3,8 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { settingsApi, type UpsertSettingInput } from '@/features/settings/api';
 import { SettingFormDialog } from '@/features/settings/components/setting-form-dialog';
 import type { Setting } from '@/features/settings/types';
@@ -13,6 +12,53 @@ import { errorMessage } from '@/lib/error-message';
 import { formatDateTime } from '@/lib/format';
 
 const WRITE_ROLES = new Set(['ADMIN']);
+
+function settingColumns(
+  canWrite: boolean,
+  deleting: boolean,
+  onDelete: (setting: Setting) => void,
+  onEdit: (setting: Setting) => void,
+): DataTableColumn<Setting>[] {
+  return [
+    { key: 'key', label: 'Key', render: (setting) => <span className="font-mono text-xs">{setting.key}</span> },
+    { key: 'value', label: 'Value', render: (setting) => <span className="text-muted-foreground">{setting.value}</span> },
+    { key: 'type', label: 'Type', render: (setting) => <span className="text-muted-foreground">{setting.valueType}</span> },
+    { key: 'description', label: 'Description', render: (setting) => <span className="text-muted-foreground">{setting.description ?? '-'}</span> },
+    { key: 'updated', label: 'Updated', render: (setting) => <span className="text-muted-foreground">{formatDateTime(setting.updatedAt)}</span> },
+    ...(canWrite
+      ? [
+          {
+            key: 'actions',
+            label: 'Actions',
+            align: 'right' as const,
+            render: (setting: Setting) => (
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onEdit(setting);
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    onDelete(setting);
+                  }}
+                  disabled={deleting}
+                >
+                  Delete
+                </Button>
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
+}
 
 export default function SettingsPage(): React.JSX.Element {
   const { user } = useAuth();
@@ -58,72 +104,20 @@ export default function SettingsPage(): React.JSX.Element {
 
       {actionError !== null && <p className="text-sm text-danger">{actionError}</p>}
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Key</th>
-                    <th className="p-3 font-medium">Value</th>
-                    <th className="p-3 font-medium">Type</th>
-                    <th className="p-3 font-medium">Description</th>
-                    <th className="p-3 font-medium">Updated</th>
-                    {canWrite && <th className="p-3 text-right font-medium">Actions</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.length === 0 && (
-                    <tr>
-                      <td colSpan={canWrite ? 6 : 5} className="p-4 text-center text-muted-foreground">
-                        No settings configured.
-                      </td>
-                    </tr>
-                  )}
-                  {data.map((setting) => (
-                    <tr key={setting.id} className="border-b border-border last:border-0">
-                      <td className="p-3 font-mono text-xs">{setting.key}</td>
-                      <td className="p-3 text-muted-foreground">{setting.value}</td>
-                      <td className="p-3 text-muted-foreground">{setting.valueType}</td>
-                      <td className="p-3 text-muted-foreground">{setting.description ?? '-'}</td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(setting.updatedAt)}</td>
-                      {canWrite && (
-                        <td className="p-3 text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setEditingSetting(setting);
-                                setDialogOpen(true);
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                void handleRemove(setting.key);
-                              }}
-                              disabled={removeMutation.isPending}
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <DataTable
+        columns={settingColumns(canWrite, removeMutation.isPending, (setting) => {
+          void handleRemove(setting.key);
+        }, (setting) => {
+          setEditingSetting(setting);
+          setDialogOpen(true);
+        })}
+        rows={data ?? []}
+        rowKey={(setting) => setting.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No settings configured."
+      />
 
       <SettingFormDialog
         open={dialogOpen}

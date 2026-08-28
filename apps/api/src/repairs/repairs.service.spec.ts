@@ -122,6 +122,7 @@ describe('RepairsService', () => {
       financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },
       stockMovement: { createMany: movementCreateMany },
+      location: { findFirstOrThrow: jest.fn(() => Promise.resolve({ id: 'location-1' })) },
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     };

@@ -1,6 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
+import { getDefaultLocationId } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma } from '../generated/prisma/client';
@@ -182,7 +183,9 @@ export class StockService {
         COUNT(*) FILTER (WHERE i."quantity" = 0)::int                                  AS "outOfStockCount"
       FROM "Inventory" i
       JOIN "Product" p ON p."id" = i."productId"
-      WHERE i."organizationId" = ${getCurrentOrgId()}::uuid AND p."deletedAt" IS NULL
+      WHERE i."organizationId" = ${getCurrentOrgId()}::uuid
+        AND i."locationId" = ${defaultLocationSubquery()}
+        AND p."deletedAt" IS NULL
     `;
 
     return (
@@ -244,6 +247,8 @@ export class StockService {
     const delta = INBOUND_TYPES.has(dto.type) ? dto.quantity : -dto.quantity;
 
     return this.prisma.$transaction(async (tx) => {
+      const locationId = await getDefaultLocationId(tx);
+
       // The guard is `quantity + delta >= reservedQuantity`, which covers both
       // rules at once: stock cannot go negative, and it cannot drop below what
       // is already committed to an order. Reserved quantity is never negative,
@@ -253,15 +258,16 @@ export class StockService {
         SET "quantity" = "quantity" + ${delta}, "updatedAt" = NOW()
         WHERE "productId" = ${dto.productId}::uuid
           AND "organizationId" = ${getCurrentOrgId()}::uuid
+          AND "locationId" = ${locationId}::uuid
           AND "quantity" + ${delta} >= "reservedQuantity"
       `;
 
       if (affected === 0) {
-        throw await this.explainRejectedAdjustment(tx, dto);
+        throw await this.explainRejectedAdjustment(tx, dto, locationId);
       }
 
       const inventory = await tx.inventory.findUniqueOrThrow({
-        where: { productId: dto.productId },
+        where: { productId_locationId: { productId: dto.productId, locationId } },
         select: { quantity: true, reservedQuantity: true },
       });
 
@@ -269,6 +275,7 @@ export class StockService {
         data: {
           organizationId: getCurrentOrgId(),
           productId: dto.productId,
+          locationId,
           type: dto.type,
           quantity: dto.quantity,
           previousQuantity: inventory.quantity - delta,
@@ -309,9 +316,13 @@ export class StockService {
    * Turns "no rows matched" into an error the caller can act on. Reached only
    * on the failure path, so the extra read costs nothing in normal operation.
    */
-  private async explainRejectedAdjustment(tx: TenantTransactionClient, dto: AdjustStockDto): Promise<ConflictException | NotFoundException> {
+  private async explainRejectedAdjustment(
+    tx: TenantTransactionClient,
+    dto: AdjustStockDto,
+    locationId: string,
+  ): Promise<ConflictException | NotFoundException> {
     const inventory = await tx.inventory.findUnique({
-      where: { productId: dto.productId },
+      where: { productId_locationId: { productId: dto.productId, locationId } },
       select: { quantity: true, reservedQuantity: true },
     });
 
@@ -328,7 +339,11 @@ export class StockService {
   }
 
   private buildStockWhere(query: StockQueryDto & { productId?: string }): Prisma.Sql {
-    const conditions: Prisma.Sql[] = [Prisma.sql`i."organizationId" = ${getCurrentOrgId()}::uuid`, Prisma.sql`p."deletedAt" IS NULL`];
+    const conditions: Prisma.Sql[] = [
+      Prisma.sql`i."organizationId" = ${getCurrentOrgId()}::uuid`,
+      Prisma.sql`i."locationId" = ${defaultLocationSubquery()}`,
+      Prisma.sql`p."deletedAt" IS NULL`,
+    ];
 
     if (query.productId !== undefined) {
       conditions.push(Prisma.sql`p."id" = ${query.productId}::uuid`);
@@ -367,6 +382,17 @@ export class StockService {
 
     return Prisma.join(conditions, ' AND ');
   }
+}
+
+/**
+ * The current organization's one default Location, as a raw-SQL subquery -
+ * consistent with the rest of this file's inline `${getCurrentOrgId()}::uuid`
+ * style, and cheaper than a round trip per call since it's inlined into the
+ * same query as everything else. See `stock-operations.ts`'s
+ * `getDefaultLocationId` for the equivalent used inside a transaction.
+ */
+function defaultLocationSubquery(): Prisma.Sql {
+  return Prisma.sql`(SELECT "id" FROM "Location" WHERE "organizationId" = ${getCurrentOrgId()}::uuid AND "isDefault" = true AND "deletedAt" IS NULL)`;
 }
 
 const MOVEMENT_INCLUDE = {

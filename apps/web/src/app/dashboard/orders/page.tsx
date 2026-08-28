@@ -4,14 +4,13 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { ordersApi } from '@/features/orders/api';
 import { OrderStatusBadge, PaymentStatusBadge } from '@/features/orders/components/order-status-badge';
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '@/features/orders/labels';
-import type { OrderStatus, PaymentStatus } from '@/features/orders/types';
+import type { OrderStatus, OrderSummary, PaymentStatus } from '@/features/orders/types';
 import { useAuth } from '@/hooks/use-auth';
 import { errorMessage } from '@/lib/error-message';
 import { formatCurrency, formatDateTime } from '@/lib/format';
@@ -121,93 +120,40 @@ export default function OrdersPage(): React.JSX.Element {
         </Select>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {isLoading && <TableSkeleton />}
-          {isError && <p className="p-4 text-sm text-danger">{errorMessage(error)}</p>}
-          {data !== undefined && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="p-3 font-medium">Order</th>
-                    <th className="p-3 font-medium">Customer</th>
-                    <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 font-medium">Payment</th>
-                    <th className="p-3 text-right font-medium">Items</th>
-                    <th className="p-3 text-right font-medium">Total</th>
-                    <th className="p-3 text-right font-medium">Outstanding</th>
-                    <th className="p-3 font-medium">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.length === 0 && (
-                    <tr>
-                      <td colSpan={8} className="p-4 text-center text-muted-foreground">
-                        No orders found.
-                      </td>
-                    </tr>
-                  )}
-                  {data.items.map((order) => (
-                    <tr
-                      key={order.id}
-                      className="cursor-pointer border-b border-border last:border-0 hover:bg-muted"
-                      onClick={() => {
-                        router.push(`/dashboard/orders/${order.id}`);
-                      }}
-                    >
-                      <td className="p-3 font-medium">{order.orderNumber}</td>
-                      <td className="p-3 text-muted-foreground">
-                        {order.customer === null ? 'Walk-in' : `${order.customer.firstName} ${order.customer.lastName}`}
-                      </td>
-                      <td className="p-3">
-                        <OrderStatusBadge status={order.status} />
-                      </td>
-                      <td className="p-3">
-                        <PaymentStatusBadge status={order.paymentStatus} />
-                      </td>
-                      <td className="p-3 text-right tabular-nums">{order._count.items}</td>
-                      <td className="p-3 text-right tabular-nums">{formatCurrency(order.total)}</td>
-                      <td className="p-3 text-right tabular-nums">{formatCurrency(order.outstanding)}</td>
-                      <td className="p-3 text-muted-foreground">{formatDateTime(order.createdAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {data !== undefined && data.pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Page {data.pagination.page} of {data.pagination.totalPages} &middot; {data.pagination.total} total
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => {
-                setPage((current) => current - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= data.pagination.totalPages}
-              onClick={() => {
-                setPage((current) => current + 1);
-              }}
-            >
-              Next
-            </Button>
-          </div>
-        </div>
-      )}
+      <DataTable
+        columns={ORDER_COLUMNS}
+        rows={data?.items ?? []}
+        rowKey={(order) => order.id}
+        isLoading={isLoading}
+        isError={isError}
+        error={error}
+        emptyMessage="No orders found."
+        onRowClick={(order) => {
+          router.push(`/dashboard/orders/${order.id}`);
+        }}
+        pagination={
+          data === undefined
+            ? undefined
+            : { page: data.pagination.page, totalPages: data.pagination.totalPages, total: data.pagination.total, onPageChange: setPage }
+        }
+      />
     </div>
   );
 }
+
+const ORDER_COLUMNS: DataTableColumn<OrderSummary>[] = [
+  { key: 'orderNumber', label: 'Order', render: (order) => <span className="font-medium">{order.orderNumber}</span> },
+  {
+    key: 'customer',
+    label: 'Customer',
+    render: (order) => (
+      <span className="text-muted-foreground">{order.customer === null ? 'Walk-in' : `${order.customer.firstName} ${order.customer.lastName}`}</span>
+    ),
+  },
+  { key: 'status', label: 'Status', render: (order) => <OrderStatusBadge status={order.status} /> },
+  { key: 'payment', label: 'Payment', render: (order) => <PaymentStatusBadge status={order.paymentStatus} /> },
+  { key: 'items', label: 'Items', align: 'right', render: (order) => <span className="tabular-nums">{order._count.items}</span> },
+  { key: 'total', label: 'Total', align: 'right', render: (order) => <span className="tabular-nums">{formatCurrency(order.total)}</span> },
+  { key: 'outstanding', label: 'Outstanding', align: 'right', render: (order) => <span className="tabular-nums">{formatCurrency(order.outstanding)}</span> },
+  { key: 'created', label: 'Created', render: (order) => <span className="text-muted-foreground">{formatDateTime(order.createdAt)}</span> },
+];
