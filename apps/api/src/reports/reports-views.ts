@@ -50,3 +50,60 @@ export interface TopProductRow {
   quantitySold: number;
   revenue: Prisma.Decimal;
 }
+
+/** Same shape as {@link buildCompletedOrderWhere} but for `PurchaseOrder`/`Repair`, whose date column varies by module. */
+export function dateRangeCondition(column: Prisma.Sql, from: Date | undefined, to: Date | undefined): Prisma.Sql {
+  const conditions: Prisma.Sql[] = [];
+
+  if (from !== undefined) {
+    conditions.push(Prisma.sql`${column} >= ${from}`);
+  }
+  if (to !== undefined) {
+    conditions.push(Prisma.sql`${column} <= ${to}`);
+  }
+
+  return conditions.length === 0 ? Prisma.sql`TRUE` : Prisma.join(conditions, ' AND ');
+}
+
+export interface SalesAnalyticsRow {
+  orderCount: number;
+  revenue: Prisma.Decimal;
+  subtotal: Prisma.Decimal;
+  discount: Prisma.Decimal;
+  cogs: Prisma.Decimal;
+}
+
+export interface LocationValuationRow {
+  locationId: string;
+  locationName: string;
+  totalUnits: number;
+  valueAtCost: Prisma.Decimal;
+  valueAtRetail: Prisma.Decimal;
+}
+
+export interface AgingBucketRow {
+  bucket: '0-30' | '31-60' | '61-90' | '90+' | 'never moved';
+  productCount: number;
+}
+
+export interface SupplierPerformanceRow {
+  supplierId: string;
+  supplierName: string;
+  orderCount: number;
+  totalSpend: Prisma.Decimal;
+  avgLeadTimeDays: number | null;
+  onTimeRate: Prisma.Decimal | null;
+}
+
+export interface RepairTurnaroundRow {
+  totalCount: number;
+  completedCount: number;
+  avgTurnaroundDays: number | null;
+  repairRevenue: Prisma.Decimal;
+}
+
+export interface TechnicianWorkloadRow {
+  technicianId: string;
+  technicianName: string;
+  activeCount: number;
+}

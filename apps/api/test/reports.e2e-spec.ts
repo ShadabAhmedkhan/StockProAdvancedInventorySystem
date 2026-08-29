@@ -1,6 +1,6 @@
 import request from 'supertest';
 import type { ApiResponse } from '../src/common/interfaces/api-response.interface';
-import { PaymentMethod, StockMovementType, UserRole } from '../src/generated/prisma/enums';
+import { PaymentMethod, RepairStatus, StockMovementType, UserRole } from '../src/generated/prisma/enums';
 import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
 
 interface Identified {
@@ -31,6 +31,18 @@ interface TopProductBody {
   revenue: string;
 }
 
+interface AdvancedAnalyticsBody {
+  sales: { orderCount: number; revenue: string; grossProfit: string; margin: string; averageOrderValue: string; discountRate: string; returnRate: string };
+  inventory: { deadStockCount: number; stockTurnover: string | null };
+  purchasing: { suppliers: { supplierId: string; orderCount: number; totalSpend: string; avgLeadTimeDays: number | null; onTimeRate: string | null }[] };
+  repairs: {
+    completionRate: string;
+    avgTurnaroundDays: number | null;
+    repairRevenue: string;
+    technicianWorkload: { technicianId: string; activeCount: number }[];
+  };
+}
+
 function body<T>(response: { body: ApiResponse<T> }): T {
   return response.body.data;
 }
@@ -43,7 +55,7 @@ describe('Reports (e2e)', () => {
   let categoryId: string;
   let customerId: string;
 
-  function as(token: string, method: 'post' | 'get', path: string): request.Test {
+  function as(token: string, method: 'post' | 'get' | 'patch', path: string): request.Test {
     return request(context.server)[method](path).set('Authorization', `Bearer ${token}`);
   }
 
@@ -82,10 +94,18 @@ describe('Reports (e2e)', () => {
 
       await context.prisma.financialTransaction.deleteMany({ where: { createdById } });
       await context.prisma.payment.deleteMany({ where: { createdById } });
+      await context.prisma.return.deleteMany({ where: { createdById } });
+      await context.prisma.repairStatusHistory.deleteMany({ where: { changedById: createdById } });
+      await context.prisma.repair.deleteMany({ where: { customer: { customerCode: { startsWith: label } } } });
+      await context.prisma.goodsReceiptItem.deleteMany({ where: { goodsReceipt: { createdById } } });
+      await context.prisma.goodsReceipt.deleteMany({ where: { createdById } });
+      await context.prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrder: { createdById } } });
+      await context.prisma.purchaseOrder.deleteMany({ where: { createdById } });
       await context.prisma.order.deleteMany({ where: { createdById } });
       await context.prisma.stockMovement.deleteMany({ where: { createdById } });
       await context.prisma.product.deleteMany({ where: { sku: { startsWith: label } } });
       await context.prisma.customer.deleteMany({ where: { customerCode: { startsWith: label } } });
+      await context.prisma.supplier.deleteMany({ where: { name: { startsWith: label } } });
       await context.prisma.category.deleteMany({ where: { name: { startsWith: label } } });
     });
 
@@ -197,6 +217,163 @@ describe('Reports (e2e)', () => {
 
     it('refuses a limit above the maximum', async () => {
       await as(adminToken, 'get', '/api/v1/reports/top-products?limit=500').expect(400);
+    });
+  });
+
+  describe('analytics', () => {
+    let technicianToken: string;
+    let technicianId: string;
+    let supplierId: string;
+
+    beforeAll(async () => {
+      const technician = await inviteTeammate(context, adminToken, 'rpt-tech', UserRole.TECHNICIAN);
+      technicianToken = technician.accessToken;
+      technicianId = technician.id;
+
+      const supplierResponse = await request(context.server)
+        .post('/api/v1/suppliers')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ supplierCode: `${label}-SUP`, name: `${label} Supplier`, phone: '+1 555 0177' })
+        .expect(201);
+      supplierId = body<Identified>(supplierResponse).id;
+    });
+
+    async function analytics(query = ''): Promise<AdvancedAnalyticsBody> {
+      const response = await as(adminToken, 'get', `/api/v1/reports/analytics${query}`).expect(200);
+      return body<AdvancedAnalyticsBody>(response);
+    }
+
+    it('derives gross profit, margin and average order value from a tightly bounded window', async () => {
+      const from = new Date();
+      // makeProduct always sets costPrice 1.00; sellingPrice 25.00 -> selling 2 units nets revenue 50.00, cogs 2.00, grossProfit 48.00.
+      const productId = await makeProduct('ANALYTICSGP', '25.00', 20);
+      await soldOrder(productId, 2, '50.00');
+      const to = new Date(Date.now() + 1000);
+
+      const report = await analytics(`?from=${from.toISOString()}&to=${to.toISOString()}`);
+
+      expect(report.sales.orderCount).toBe(1);
+      expect(report.sales.revenue).toBe('50.00');
+      expect(report.sales.grossProfit).toBe('48.00');
+      expect(report.sales.margin).toBe('0.96');
+      expect(report.sales.averageOrderValue).toBe('50.00');
+    });
+
+    it('counts a completed return against the orders in the same window', async () => {
+      const from = new Date();
+      const productId = await makeProduct('ANALYTICSRET', '30.00', 20);
+      const order = await soldOrder(productId, 1, '30.00');
+
+      const orderDetail = await as(adminToken, 'get', `/api/v1/orders/${order.id}`).expect(200);
+      const itemId = (body<{ items: { id: string }[] }>(orderDetail).items[0] as { id: string }).id;
+
+      const returnCreated = await as(adminToken, 'post', '/api/v1/returns')
+        .send({ orderId: order.id, reason: 'CHANGED_MIND', items: [{ orderItemId: itemId, quantity: 1 }] })
+        .expect(201);
+      const returnId = body<Identified>(returnCreated).id;
+
+      await as(adminToken, 'post', `/api/v1/returns/${returnId}/approve`).expect(200);
+      await as(adminToken, 'post', `/api/v1/returns/${returnId}/complete`).send({ method: PaymentMethod.CASH }).expect(200);
+
+      const to = new Date(Date.now() + 1000);
+      const report = await analytics(`?from=${from.toISOString()}&to=${to.toISOString()}`);
+
+      // 1 order, 1 completed return in the same window -> returnRate 1.
+      expect(report.sales.returnRate).toBe('1.00');
+    });
+
+    it('reports a fully received purchase order against its supplier', async () => {
+      const from = new Date();
+      const productCreated = await as(adminToken, 'post', '/api/v1/products')
+        .send({ sku: `${label}-ANALYTICSPO`, name: 'Report ANALYTICSPO', categoryId, costPrice: '1.00', sellingPrice: '10.00' })
+        .expect(201);
+      const productId = body<Identified>(productCreated).id;
+
+      const poCreated = await as(adminToken, 'post', '/api/v1/purchase-orders')
+        .send({ supplierId, items: [{ productId, quantity: 5, unitCost: '4.00' }] })
+        .expect(201);
+      const po = body<{ id: string; items: { id: string }[] }>(poCreated);
+
+      await as(adminToken, 'post', `/api/v1/purchase-orders/${po.id}/approve`).expect(200);
+      await as(adminToken, 'post', `/api/v1/purchase-orders/${po.id}/order`).expect(200);
+      await as(adminToken, 'post', `/api/v1/purchase-orders/${po.id}/goods-receipts`)
+        .send({ items: [{ purchaseOrderItemId: po.items[0]?.id, quantityReceived: 5 }] })
+        .expect(201);
+
+      const to = new Date(Date.now() + 1000);
+      const report = await analytics(`?from=${from.toISOString()}&to=${to.toISOString()}`);
+
+      const row = report.purchasing.suppliers.find((s) => s.supplierId === supplierId);
+      expect(row).toBeDefined();
+      expect(row?.orderCount).toBe(1);
+      expect(row?.totalSpend).toBe('20.00');
+      expect(row?.avgLeadTimeDays).not.toBeNull();
+    });
+
+    it('reports a completed repair against turnaround, completion rate and revenue', async () => {
+      const from = new Date();
+
+      const customer = await as(adminToken, 'post', '/api/v1/customers')
+        .send({ customerCode: `${label}-RC1`, firstName: 'Analytics', lastName: 'Repair', phone: '+1 555 0188' })
+        .expect(201);
+      const repairCustomerId = body<Identified>(customer).id;
+
+      const repairCreated = await as(adminToken, 'post', '/api/v1/repairs')
+        .send({
+          customerId: repairCustomerId,
+          deviceType: 'PHONE',
+          problemDescription: 'Cracked screen',
+          technicianId,
+        })
+        .expect(201);
+      const repairId = body<Identified>(repairCreated).id;
+
+      async function moveTo(toStatus: RepairStatus): Promise<void> {
+        await request(context.server)
+          .post(`/api/v1/repairs/${repairId}/status`)
+          .set('Authorization', `Bearer ${technicianToken}`)
+          .send({ toStatus })
+          .expect(200);
+      }
+
+      await moveTo(RepairStatus.DIAGNOSING);
+      await moveTo(RepairStatus.APPROVED);
+      await moveTo(RepairStatus.IN_PROGRESS);
+      await as(adminToken, 'patch', `/api/v1/repairs/${repairId}`)
+        .send({ finalCost: '75.00' })
+        .expect(200);
+      await moveTo(RepairStatus.COMPLETED);
+
+      const to = new Date(Date.now() + 1000);
+      const report = await analytics(`?from=${from.toISOString()}&to=${to.toISOString()}`);
+
+      expect(report.repairs.completionRate).toBe('1.00');
+      expect(report.repairs.repairRevenue).toBe('75.00');
+      expect(report.repairs.avgTurnaroundDays).not.toBeNull();
+    });
+
+    it('counts a technician mid-repair as active workload', async () => {
+      const customer = await as(adminToken, 'post', '/api/v1/customers')
+        .send({ customerCode: `${label}-RC2`, firstName: 'Analytics', lastName: 'Workload', phone: '+1 555 0166' })
+        .expect(201);
+      const repairCustomerId = body<Identified>(customer).id;
+
+      await as(adminToken, 'post', '/api/v1/repairs')
+        .send({ customerId: repairCustomerId, deviceType: 'LAPTOP', problemDescription: 'Wont boot', technicianId })
+        .expect(201);
+
+      const report = await analytics();
+      const row = report.repairs.technicianWorkload.find((t) => t.technicianId === technicianId);
+
+      expect(row).toBeDefined();
+      expect(row?.activeCount).toBeGreaterThanOrEqual(1);
+    });
+
+    it('counts an unsold, in-stock product as dead stock', async () => {
+      await makeProduct('ANALYTICSDEAD', '15.00', 10);
+
+      const report = await analytics();
+      expect(report.inventory.deadStockCount).toBeGreaterThanOrEqual(1);
     });
   });
 });

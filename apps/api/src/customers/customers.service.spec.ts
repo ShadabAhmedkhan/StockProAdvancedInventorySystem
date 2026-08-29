@@ -18,6 +18,7 @@ function customer(overrides: Partial<Customer> = {}): Customer {
     email: 'leila.farouk@example.test',
     address: '12 Harbour Road',
     notes: null,
+    tags: [],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     deletedAt: null,
@@ -37,6 +38,20 @@ describe('CustomersService', () => {
   let update: jest.Mock;
   let count: jest.Mock;
   let transaction: jest.Mock;
+  let orderFindMany: jest.Mock;
+  let orderCount: jest.Mock;
+  let orderAggregate: jest.Mock;
+  let repairFindMany: jest.Mock;
+  let repairCount: jest.Mock;
+  let returnFindMany: jest.Mock;
+  let paymentAggregate: jest.Mock;
+  let noteFindMany: jest.Mock;
+  let noteCreate: jest.Mock;
+  let addressFindMany: jest.Mock;
+  let addressCreate: jest.Mock;
+  let addressUpdate: jest.Mock;
+  let addressUpdateMany: jest.Mock;
+  let addressDelete: jest.Mock;
 
   beforeEach(async () => {
     jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
@@ -47,14 +62,49 @@ describe('CustomersService', () => {
     count = jest.fn(() => Promise.resolve(1));
     transaction = jest.fn((operations: Promise<unknown>[]) => Promise.all(operations));
 
+    orderFindMany = jest.fn(() => Promise.resolve([]));
+    orderCount = jest.fn(() => Promise.resolve(0));
+    orderAggregate = jest.fn(() => Promise.resolve({ _sum: { paidAmount: null } }));
+    repairFindMany = jest.fn(() => Promise.resolve([]));
+    repairCount = jest.fn(() => Promise.resolve(0));
+    returnFindMany = jest.fn(() => Promise.resolve([]));
+    paymentAggregate = jest.fn(() => Promise.resolve({ _sum: { amount: null } }));
+    noteFindMany = jest.fn(() => Promise.resolve([]));
+    noteCreate = jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve({ id: 'note-1', ...args.data }));
+    addressFindMany = jest.fn(() => Promise.resolve([]));
+    addressCreate = jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve({ id: 'address-1', ...args.data }));
+    addressUpdate = jest.fn((args: { data: Record<string, unknown> }) => Promise.resolve({ id: 'address-1', customerId: 'customer-1', ...args.data }));
+    addressUpdateMany = jest.fn(() => Promise.resolve({ count: 0 }));
+    addressDelete = jest.fn(() => Promise.resolve({ id: 'address-1' }));
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         CustomersService,
-        { provide: TENANT_PRISMA, useValue: { customer: { findUnique, findMany, create, update, count }, $transaction: transaction } },
+        {
+          provide: TENANT_PRISMA,
+          useValue: {
+            customer: { findUnique, findMany, create, update, count },
+            order: { findMany: orderFindMany, count: orderCount, aggregate: orderAggregate },
+            repair: { findMany: repairFindMany, count: repairCount },
+            return: { findMany: returnFindMany },
+            payment: { aggregate: paymentAggregate },
+            customerNote: { findMany: noteFindMany, create: noteCreate },
+            customerAddress: {
+              findMany: addressFindMany,
+              findUnique: jest.fn(() => Promise.resolve({ id: 'address-1', customerId: 'customer-1' })),
+              create: addressCreate,
+              update: addressUpdate,
+              updateMany: addressUpdateMany,
+              delete: addressDelete,
+            },
+            $transaction: transaction,
+          },
+        },
       ],
     }).compile();
 
     service = moduleRef.get(CustomersService);
+    findUnique.mockResolvedValue(customer());
   });
 
   function capturedWhere(): Prisma.CustomerWhereInput {
@@ -259,6 +309,73 @@ describe('CustomersService', () => {
 
       await expect(service.restore('customer-1')).rejects.toThrow(ConflictException);
       expect(update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lifetimeValue', () => {
+    it('sums paid order amounts and repair payments', async () => {
+      orderAggregate.mockResolvedValue({ _sum: { paidAmount: { toFixed: () => '100.00', add: (n: { toFixed: () => string }) => ({ toFixed: () => '150.00' }) } } });
+      paymentAggregate.mockResolvedValue({ _sum: { amount: { toFixed: () => '50.00' } } });
+
+      const result = await service.lifetimeValue('customer-1');
+
+      expect(result).toEqual({ orderRevenue: '100.00', repairRevenue: '50.00', total: '150.00' });
+    });
+
+    it('is zero when nothing has been collected yet', async () => {
+      const result = await service.lifetimeValue('customer-1');
+
+      expect(result).toEqual({ orderRevenue: '0.00', repairRevenue: '0.00', total: '0.00' });
+    });
+
+    it('404s for a customer that does not exist', async () => {
+      findUnique.mockResolvedValue(null);
+
+      await expect(service.lifetimeValue('missing')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('outstanding', () => {
+    it('only returns orders that are unpaid or partially paid', async () => {
+      await service.outstanding('customer-1');
+
+      const { where } = firstCallArg(orderFindMany) as { where: { paymentStatus: { in: string[] } } };
+      expect(where.paymentStatus.in).toEqual(['UNPAID', 'PARTIAL']);
+    });
+  });
+
+  describe('notes', () => {
+    it('stamps the note with the calling user as author', async () => {
+      await service.addNote('customer-1', { body: 'Called about a delayed delivery' }, 'user-1');
+
+      const { data } = firstCallArg(noteCreate) as { data: Record<string, unknown> };
+      expect(data).toMatchObject({ customerId: 'customer-1', authorId: 'user-1', body: 'Called about a delayed delivery' });
+    });
+
+    it('404s for a customer that does not exist', async () => {
+      findUnique.mockResolvedValue(null);
+
+      await expect(service.listNotes('missing')).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('addresses', () => {
+    it('clears the previous default when a new address is marked default', async () => {
+      await service.addAddress('customer-1', {
+        label: 'Home',
+        line1: '1 Main St',
+        city: 'Cairo',
+        state: 'Cairo',
+        postalCode: '11511',
+        country: 'Egypt',
+        isDefault: true,
+      });
+
+      expect(addressUpdateMany).toHaveBeenCalledWith({ where: { customerId: 'customer-1', isDefault: true }, data: { isDefault: false } });
+    });
+
+    it('rejects updating an address that belongs to a different customer', async () => {
+      await expect(service.updateAddress('someone-else', 'address-1', { label: 'Work' })).rejects.toThrow(NotFoundException);
     });
   });
 });

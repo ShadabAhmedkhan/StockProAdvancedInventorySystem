@@ -14,7 +14,7 @@ import { errorMessage } from '@/lib/error-message';
 import { formatCurrency, formatNumber, formatShortDate } from '@/lib/format';
 import { exportTableToPdf } from '@/lib/pdf-export';
 
-const TABS = ['Sales', 'Inventory', 'Top products'] as const;
+const TABS = ['Sales', 'Inventory', 'Top products', 'Analytics'] as const;
 type Tab = (typeof TABS)[number];
 
 const PERIOD_LABELS: Record<SalesReportPeriod, string> = { day: 'Day', week: 'Week', month: 'Month' };
@@ -78,6 +78,165 @@ export default function ReportsPage(): React.JSX.Element {
       {tab === 'Sales' && <SalesTab from={from} to={to} />}
       {tab === 'Inventory' && <InventoryTab />}
       {tab === 'Top products' && <TopProductsTab from={from} to={to} />}
+      {tab === 'Analytics' && <AnalyticsTab from={from} to={to} />}
+    </div>
+  );
+}
+
+function AnalyticsTab({ from, to }: { from: string; to: string }): React.JSX.Element {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['reports-analytics', from, to],
+    queryFn: () => reportsApi.analytics({ from: from === '' ? undefined : from, to: to === '' ? undefined : to }),
+  });
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading...</p>;
+  if (isError || data === undefined) return <p className="text-sm text-danger">{errorMessage(error)}</p>;
+
+  const { sales, inventory, purchasing, repairs, finance } = data;
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Sales</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Orders" value={formatNumber(sales.orderCount)} />
+          <KpiCard label="Revenue" value={formatCurrency(sales.revenue)} />
+          <KpiCard label="Gross profit" value={formatCurrency(sales.grossProfit)} hint={`${(Number(sales.margin) * 100).toFixed(0)}% margin`} />
+          <KpiCard label="Avg order value" value={formatCurrency(sales.averageOrderValue)} />
+          <KpiCard label="Discount rate" value={`${(Number(sales.discountRate) * 100).toFixed(1)}%`} />
+          <KpiCard label="Return rate" value={`${(Number(sales.returnRate) * 100).toFixed(1)}%`} />
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Inventory</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Stock turnover" value={inventory.stockTurnover ?? 'N/A'} />
+          <KpiCard label="Dead stock (products)" value={formatNumber(inventory.deadStockCount)} />
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Aging</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Bucket</th>
+                    <th className="p-3 text-right font-medium">Products</th>
+                    <th className="p-3 text-right font-medium">Value at cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventory.aging.map((row) => (
+                    <tr key={row.bucket} className="border-b border-border last:border-0">
+                      <td className="p-3">{row.bucket}</td>
+                      <td className="p-3 text-right tabular-nums">{formatNumber(row.productCount)}</td>
+                      <td className="p-3 text-right tabular-nums">{formatCurrency(row.valueAtCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Purchasing</h2>
+        <Card>
+          <CardHeader>
+            <CardTitle>Supplier performance</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Supplier</th>
+                    <th className="p-3 text-right font-medium">Orders</th>
+                    <th className="p-3 text-right font-medium">Total spend</th>
+                    <th className="p-3 text-right font-medium">Avg lead time</th>
+                    <th className="p-3 text-right font-medium">On-time rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {purchasing.suppliers.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="p-4 text-center text-muted-foreground">
+                        No purchase orders in this period.
+                      </td>
+                    </tr>
+                  )}
+                  {purchasing.suppliers.map((row) => (
+                    <tr key={row.supplierId} className="border-b border-border last:border-0">
+                      <td className="p-3">{row.supplierName}</td>
+                      <td className="p-3 text-right tabular-nums">{formatNumber(row.orderCount)}</td>
+                      <td className="p-3 text-right tabular-nums">{formatCurrency(row.totalSpend)}</td>
+                      <td className="p-3 text-right tabular-nums">{row.avgLeadTimeDays === null ? 'N/A' : `${row.avgLeadTimeDays.toFixed(1)}d`}</td>
+                      <td className="p-3 text-right tabular-nums">{row.onTimeRate === null ? 'N/A' : `${(Number(row.onTimeRate) * 100).toFixed(0)}%`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Repairs</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Completion rate" value={`${(Number(repairs.completionRate) * 100).toFixed(0)}%`} />
+          <KpiCard label="Avg turnaround" value={repairs.avgTurnaroundDays === null ? 'N/A' : `${Number(repairs.avgTurnaroundDays).toFixed(1)}d`} />
+          <KpiCard label="Repair revenue" value={formatCurrency(repairs.repairRevenue)} />
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Technician workload</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="p-3 font-medium">Technician</th>
+                    <th className="p-3 text-right font-medium">Active</th>
+                    <th className="p-3 text-right font-medium">Completed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {repairs.technicianWorkload.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="p-4 text-center text-muted-foreground">
+                        No technicians found.
+                      </td>
+                    </tr>
+                  )}
+                  {repairs.technicianWorkload.map((row) => (
+                    <tr key={row.technicianId} className="border-b border-border last:border-0">
+                      <td className="p-3">{row.technicianName}</td>
+                      <td className="p-3 text-right tabular-nums">{formatNumber(row.activeCount)}</td>
+                      <td className="p-3 text-right tabular-nums">{formatNumber(row.completedCount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Finance</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <KpiCard label="Net revenue" value={formatCurrency(finance.netRevenue)} />
+          <KpiCard label="Net position" value={formatCurrency(finance.netPosition)} />
+          <KpiCard label="Refunds" value={formatCurrency(finance.refunds)} />
+          <KpiCard label="Expenses" value={formatCurrency(finance.expenses.total)} />
+        </div>
+      </section>
     </div>
   );
 }

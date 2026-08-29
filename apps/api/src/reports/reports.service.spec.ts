@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 import * as tenantContext from '../common/tenant/tenant-context';
+import { FinanceService, type FinanceSummary } from '../finance/finance.service';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StockService, type StockSummary } from '../stock/stock.service';
@@ -18,21 +19,34 @@ const STOCK_SUMMARY: StockSummary = {
   outOfStockCount: 1,
 };
 
+const FINANCE_SUMMARY: FinanceSummary = {
+  from: null,
+  to: null,
+  income: { sale: decimal('0.00'), repairPayment: decimal('0.00'), otherIncome: decimal('0.00'), total: decimal('0.00') },
+  refunds: decimal('0.00'),
+  expenses: { byCategory: {} as FinanceSummary['expenses']['byCategory'], total: decimal('0.00') },
+  netRevenue: decimal('0.00'),
+  netPosition: decimal('0.00'),
+};
+
 describe('ReportsService', () => {
   let service: ReportsService;
   let queryRaw: jest.Mock;
   let stockSummary: jest.Mock;
+  let financeSummary: jest.Mock;
 
   beforeEach(async () => {
     jest.spyOn(tenantContext, 'getCurrentOrgId').mockReturnValue('org-1');
     queryRaw = jest.fn(() => Promise.resolve([]));
     stockSummary = jest.fn(() => Promise.resolve(STOCK_SUMMARY));
+    financeSummary = jest.fn(() => Promise.resolve(FINANCE_SUMMARY));
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ReportsService,
         { provide: PrismaService, useValue: { $queryRaw: queryRaw } },
         { provide: StockService, useValue: { summary: stockSummary } },
+        { provide: FinanceService, useValue: { summary: financeSummary } },
       ],
     }).compile();
 
@@ -137,6 +151,52 @@ describe('ReportsService', () => {
 
       expect(products).toHaveLength(1);
       expect(products[0]?.sku).toBe('SKU-1');
+    });
+  });
+
+  describe('advancedAnalytics', () => {
+    it('defaults every figure to zero/null rather than throwing when every query comes back empty', async () => {
+      const analytics = await service.advancedAnalytics({ deadStockDays: 90 });
+
+      expect(analytics.sales.orderCount).toBe(0);
+      expect(analytics.sales.revenue.toFixed(2)).toBe('0.00');
+      expect(analytics.sales.margin.toFixed(2)).toBe('0.00');
+      expect(analytics.sales.averageOrderValue.toFixed(2)).toBe('0.00');
+      expect(analytics.sales.returnRate.toFixed(2)).toBe('0.00');
+      expect(analytics.inventory.deadStockCount).toBe(0);
+      expect(analytics.inventory.stockTurnover?.toFixed(2)).toBe('0.00');
+      expect(analytics.repairs.completionRate.toFixed(2)).toBe('0.00');
+      expect(analytics.repairs.avgTurnaroundDays).toBeNull();
+      expect(analytics.finance).toEqual(FINANCE_SUMMARY);
+    });
+
+    it('derives gross profit, margin and average order value from the sales row', async () => {
+      // First $queryRaw call in advancedAnalytics is the sales CTE; every other call still resolves to [] via mockResolvedValueOnce.
+      queryRaw.mockResolvedValueOnce([{ orderCount: 4, revenue: decimal('400.00'), subtotal: decimal('420.00'), discount: decimal('20.00'), cogs: decimal('160.00') }]);
+
+      const analytics = await service.advancedAnalytics({ deadStockDays: 90 });
+
+      expect(analytics.sales.grossProfit.toFixed(2)).toBe('240.00');
+      expect(analytics.sales.margin.toFixed(2)).toBe('0.60');
+      expect(analytics.sales.averageOrderValue.toFixed(2)).toBe('100.00');
+      expect(analytics.sales.discountRate.toFixed(4)).toBe('0.0476');
+    });
+
+    it('computes stock turnover as COGS over the current inventory cost value', async () => {
+      queryRaw.mockResolvedValueOnce([{ orderCount: 1, revenue: decimal('100.00'), subtotal: decimal('100.00'), discount: decimal('0.00'), cogs: decimal('500.00') }]);
+      // STOCK_SUMMARY.inventoryValueAtCost is '1000.00' -> turnover = 500/1000 = 0.5.
+
+      const analytics = await service.advancedAnalytics({ deadStockDays: 90 });
+
+      expect(analytics.inventory.stockTurnover?.toFixed(2)).toBe('0.50');
+    });
+
+    it('reports stock turnover as null rather than dividing by zero when there is no inventory value', async () => {
+      stockSummary.mockResolvedValue({ ...STOCK_SUMMARY, inventoryValueAtCost: '0.00' });
+
+      const analytics = await service.advancedAnalytics({ deadStockDays: 90 });
+
+      expect(analytics.inventory.stockTurnover).toBeNull();
     });
   });
 });

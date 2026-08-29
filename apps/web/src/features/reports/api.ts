@@ -1,5 +1,5 @@
 import { apiClient } from '@/lib/api-client';
-import type { InventoryReport, SalesReport, SalesReportPeriod, TopProduct } from './types';
+import type { AdvancedAnalytics, InventoryReport, SalesReport, SalesReportPeriod, TopProduct } from './types';
 
 function query(params: Record<string, string | number | boolean | undefined>): string {
   const search = new URLSearchParams();
@@ -24,9 +24,17 @@ export interface TopProductsParams {
   limit?: number;
 }
 
+export interface AnalyticsParams {
+  from?: string;
+  to?: string;
+  deadStockDays?: number;
+}
+
 export const reportsApi = {
   sales: ({ from, to, groupBy }: SalesReportParams): Promise<SalesReport> => apiClient.get<SalesReport>(`/reports/sales${query({ from, to, groupBy })}`),
   inventory: (): Promise<InventoryReport> => apiClient.get<InventoryReport>('/reports/inventory'),
   topProducts: ({ from, to, limit }: TopProductsParams): Promise<TopProduct[]> =>
     apiClient.get<TopProduct[]>(`/reports/top-products${query({ from, to, limit })}`),
+  analytics: ({ from, to, deadStockDays }: AnalyticsParams): Promise<AdvancedAnalytics> =>
+    apiClient.get<AdvancedAnalytics>(`/reports/analytics${query({ from, to, deadStockDays })}`),
 };

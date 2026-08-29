@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { trim, trimLowercase, trimUppercase } from '../../common/utils/transform.util';
 import { ENTITY_CODE_PATTERN, PHONE_PATTERN } from '../../common/validation/patterns';
 
@@ -43,4 +43,11 @@ export class CreateCustomerDto {
   @Transform(trim)
   @IsOptional()
   notes?: string;
+
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  @IsOptional()
+  tags?: string[];
 }

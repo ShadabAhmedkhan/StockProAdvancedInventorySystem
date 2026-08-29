@@ -359,6 +359,8 @@ model Organization {
   stockCounts           StockCount[]
   notifications         Notification[]
   automationRules       AutomationRule[]
+  customerNotes         CustomerNote[]
+  customerAddresses     CustomerAddress[]
 
   @@index([subscriptionStatus])
 }
@@ -414,6 +416,7 @@ model User {
   stockCountsApproved   StockCount[]           @relation("StockCountApprovedBy")
   notifications         Notification[]
   automationRulesCreated AutomationRule[]
+  customerNotesAuthored  CustomerNote[]
 
   @@index([organizationId])
   @@index([role])
@@ -470,15 +473,18 @@ model Customer {
   email          String?   @db.VarChar(255)
   address        String?   @db.VarChar(500)
   notes          String?
+  tags           String[]  @default([])
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  orders  Order[]
-  repairs Repair[]
-  returns Return[]
+  orders      Order[]
+  repairs     Repair[]
+  returns     Return[]
+  noteEntries CustomerNote[]
+  addresses   CustomerAddress[]
 
   @@unique([organizationId, customerCode])
   @@index([organizationId])
@@ -487,6 +493,47 @@ model Customer {
   @@index([email])
   @@index([deletedAt])
   @@index([createdAt])
+}
+
+/// A timestamped note attached to a customer. `Customer.notes` stays as a
+/// single pinned/summary field; this is the append-only log alongside it.
+model CustomerNote {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @db.Uuid
+  customerId     String   @db.Uuid
+  authorId       String   @db.Uuid
+  body           String
+  createdAt      DateTime @default(now())
+
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([customerId, createdAt])
+  @@index([authorId])
+}
+
+model CustomerAddress {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @db.Uuid
+  customerId     String   @db.Uuid
+  label          String   @db.VarChar(50)
+  line1          String   @db.VarChar(255)
+  line2          String?  @db.VarChar(255)
+  city           String   @db.VarChar(100)
+  state          String   @db.VarChar(100)
+  postalCode     String   @db.VarChar(20)
+  country        String   @db.VarChar(100)
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([customerId])
 }
 
 model Supplier {

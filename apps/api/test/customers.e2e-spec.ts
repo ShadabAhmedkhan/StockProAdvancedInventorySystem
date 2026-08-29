@@ -3,8 +3,16 @@ import request from 'supertest';
 import { ErrorCode } from '../src/common/enums/error-code.enum';
 import type { ApiErrorResponse, ApiResponse } from '../src/common/interfaces/api-response.interface';
 import type { Customer } from '../src/generated/prisma/client';
-import { UserRole } from '../src/generated/prisma/enums';
+import { PaymentMethod, RepairStatus, StockMovementType, UserRole } from '../src/generated/prisma/enums';
 import { closeTestApp, createTestApp, inviteTeammate, signInAs, type TestApp } from './support/auth.helper';
+
+interface Identified {
+  id: string;
+}
+
+function body<T>(response: { body: ApiResponse<T> }): T {
+  return response.body.data;
+}
 
 describe('Customers (e2e)', () => {
   let context: TestApp;
@@ -29,6 +37,16 @@ describe('Customers (e2e)', () => {
     prefix = `C${context.run.slice(0, 5).toUpperCase()}`;
 
     context.cleanup.push(async () => {
+      const customerIds = (await context.prisma.customer.findMany({ where: { customerCode: { startsWith: prefix } }, select: { id: true } })).map((c) => c.id);
+      await context.prisma.customerNote.deleteMany({ where: { customerId: { in: customerIds } } });
+      await context.prisma.customerAddress.deleteMany({ where: { customerId: { in: customerIds } } });
+      await context.prisma.financialTransaction.deleteMany({ where: { createdById: { in: context.createdUserIds } } });
+      await context.prisma.payment.deleteMany({ where: { OR: [{ order: { customerId: { in: customerIds } } }, { repair: { customerId: { in: customerIds } } }] } });
+      await context.prisma.repair.deleteMany({ where: { customerId: { in: customerIds } } });
+      await context.prisma.order.deleteMany({ where: { customerId: { in: customerIds } } });
+      await context.prisma.stockMovement.deleteMany({ where: { product: { sku: { startsWith: prefix } } } });
+      await context.prisma.product.deleteMany({ where: { sku: { startsWith: prefix } } });
+      await context.prisma.category.deleteMany({ where: { name: { startsWith: prefix } } });
       await context.prisma.customer.deleteMany({ where: { customerCode: { startsWith: prefix } } });
     });
 
@@ -355,6 +373,256 @@ describe('Customers (e2e)', () => {
         .expect(409);
 
       expect((response.body as ApiErrorResponse).message).toMatch(/deleted customer/i);
+    });
+  });
+
+  describe('CRM: notes, addresses, tags, history and timeline', () => {
+    let categoryId: string;
+    let crmCustomerId: string;
+    let orderId: string;
+    let repairId: string;
+
+    async function makeProduct(suffix: string, sellingPrice: string, quantity: number): Promise<string> {
+      const created = await request(context.server)
+        .post('/api/v1/products')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ sku: `${prefix}-${suffix}`, name: `CRM ${suffix}`, categoryId, costPrice: '1.00', sellingPrice })
+        .expect(201);
+      const productId = body<Identified>(created).id;
+
+      await request(context.server)
+        .post('/api/v1/stock/adjust')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ productId, type: StockMovementType.PURCHASE, quantity })
+        .expect(200);
+
+      return productId;
+    }
+
+    beforeAll(async () => {
+      const category = await request(context.server)
+        .post('/api/v1/categories')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: `${prefix}-crm-cat` })
+        .expect(201);
+      categoryId = body<Identified>(category).id;
+
+      const customer = await createCustomer(adminToken, { customerCode: code('CRM'), firstName: 'Nadia', lastName: 'Costa', phone: '+15550200' });
+      crmCustomerId = customer.data.id;
+
+      // A completed order, partly paid: 100.00 owed, 40.00 collected.
+      const productId = await makeProduct('P1', '100.00', 5);
+      const draft = await request(context.server)
+        .post('/api/v1/orders')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ customerId: crmCustomerId, items: [{ productId, quantity: 1 }] })
+        .expect(201);
+      orderId = body<Identified>(draft).id;
+      await request(context.server).post(`/api/v1/orders/${orderId}/confirm`).set('Authorization', `Bearer ${staffToken}`).expect(200);
+      await request(context.server).post(`/api/v1/orders/${orderId}/complete`).set('Authorization', `Bearer ${staffToken}`).expect(200);
+      await request(context.server)
+        .post(`/api/v1/orders/${orderId}/payments`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ method: PaymentMethod.CASH, amount: '40.00' })
+        .expect(201);
+
+      // A completed repair, priced at 60.00, fully paid.
+      const repair = await request(context.server)
+        .post('/api/v1/repairs')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ customerId: crmCustomerId, deviceType: 'PHONE', problemDescription: 'Cracked screen' })
+        .expect(201);
+      repairId = body<Identified>(repair).id;
+      await request(context.server)
+        .post(`/api/v1/repairs/${repairId}/status`)
+        .set('Authorization', `Bearer ${technicianToken}`)
+        .send({ toStatus: RepairStatus.DIAGNOSING })
+        .expect(200);
+      await request(context.server)
+        .post(`/api/v1/repairs/${repairId}/status`)
+        .set('Authorization', `Bearer ${technicianToken}`)
+        .send({ toStatus: RepairStatus.APPROVED })
+        .expect(200);
+      await request(context.server)
+        .post(`/api/v1/repairs/${repairId}/status`)
+        .set('Authorization', `Bearer ${technicianToken}`)
+        .send({ toStatus: RepairStatus.IN_PROGRESS })
+        .expect(200);
+      await request(context.server)
+        .patch(`/api/v1/repairs/${repairId}`)
+        .set('Authorization', `Bearer ${technicianToken}`)
+        .send({ finalCost: '60.00' })
+        .expect(200);
+      await request(context.server)
+        .post(`/api/v1/repairs/${repairId}/status`)
+        .set('Authorization', `Bearer ${technicianToken}`)
+        .send({ toStatus: RepairStatus.COMPLETED })
+        .expect(200);
+      await request(context.server)
+        .post(`/api/v1/repairs/${repairId}/payments`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .send({ method: PaymentMethod.CASH, amount: '60.00' })
+        .expect(201);
+    });
+
+    describe('tags', () => {
+      it('sets tags through the ordinary update endpoint', async () => {
+        const response = await request(context.server)
+          .patch(`/api/v1/customers/${crmCustomerId}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ tags: ['vip', 'wholesale'] })
+          .expect(200);
+
+        expect((response.body as ApiResponse<Customer>).data.tags).toEqual(['vip', 'wholesale']);
+      });
+    });
+
+    describe('notes', () => {
+      it('adds a note authored by the caller and lists it newest first', async () => {
+        await request(context.server)
+          .post(`/api/v1/customers/${crmCustomerId}/notes`)
+          .set('Authorization', `Bearer ${staffToken}`)
+          .send({ body: 'First note' })
+          .expect(201);
+        await request(context.server)
+          .post(`/api/v1/customers/${crmCustomerId}/notes`)
+          .set('Authorization', `Bearer ${staffToken}`)
+          .send({ body: 'Second note' })
+          .expect(201);
+
+        const list = await request(context.server).get(`/api/v1/customers/${crmCustomerId}/notes`).set('Authorization', `Bearer ${adminToken}`).expect(200);
+        const notes = (list.body as ApiResponse<{ body: string }[]>).data;
+
+        expect(notes[0]?.body).toBe('Second note');
+        expect(notes[1]?.body).toBe('First note');
+      });
+
+      it('refuses a technician from adding a note', async () => {
+        await request(context.server)
+          .post(`/api/v1/customers/${crmCustomerId}/notes`)
+          .set('Authorization', `Bearer ${technicianToken}`)
+          .send({ body: 'Not allowed' })
+          .expect(403);
+      });
+    });
+
+    describe('addresses', () => {
+      it('adds an address and later flips the default to a new one', async () => {
+        const first = await request(context.server)
+          .post(`/api/v1/customers/${crmCustomerId}/addresses`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ label: 'Home', line1: '1 Main St', city: 'Cairo', state: 'Cairo', postalCode: '11511', country: 'Egypt', isDefault: true })
+          .expect(201);
+
+        const second = await request(context.server)
+          .post(`/api/v1/customers/${crmCustomerId}/addresses`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ label: 'Work', line1: '2 Office Rd', city: 'Giza', state: 'Giza', postalCode: '12511', country: 'Egypt', isDefault: true })
+          .expect(201);
+
+        const list = await request(context.server).get(`/api/v1/customers/${crmCustomerId}/addresses`).set('Authorization', `Bearer ${adminToken}`).expect(200);
+        const addresses = (list.body as ApiResponse<{ id: string; isDefault: boolean }[]>).data;
+
+        expect(addresses.find((a) => a.id === body<Identified>(first).id)?.isDefault).toBe(false);
+        expect(addresses.find((a) => a.id === body<Identified>(second).id)?.isDefault).toBe(true);
+      });
+
+      it('404s updating and deleting an address that is not this customer\'s', async () => {
+        const otherCustomer = await createCustomer(adminToken, { customerCode: code('OTH'), firstName: 'Other', lastName: 'Person', phone: '+15550201' });
+        const address = await request(context.server)
+          .post(`/api/v1/customers/${otherCustomer.data.id}/addresses`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ label: 'Home', line1: '9 Elsewhere', city: 'Alex', state: 'Alex', postalCode: '21500', country: 'Egypt' })
+          .expect(201);
+
+        await request(context.server)
+          .patch(`/api/v1/customers/${crmCustomerId}/addresses/${body<Identified>(address).id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ label: 'Hijacked' })
+          .expect(404);
+
+        await request(context.server)
+          .delete(`/api/v1/customers/${crmCustomerId}/addresses/${body<Identified>(address).id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(404);
+      });
+    });
+
+    describe('history, outstanding and lifetime value', () => {
+      it('lists the real order in purchase history', async () => {
+        const response = await request(context.server)
+          .get(`/api/v1/customers/${crmCustomerId}/purchase-history`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+        const orders = (response.body as ApiResponse<{ id: string; outstanding: string }[]>).data;
+
+        expect(orders.some((o) => o.id === orderId)).toBe(true);
+      });
+
+      it('lists the real repair in repair history', async () => {
+        const response = await request(context.server)
+          .get(`/api/v1/customers/${crmCustomerId}/repair-history`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+        const repairs = (response.body as ApiResponse<{ id: string }[]>).data;
+
+        expect(repairs.some((r) => r.id === repairId)).toBe(true);
+      });
+
+      it('shows the order as outstanding because it is only partly paid, and no repairs because that one is settled', async () => {
+        const response = await request(context.server)
+          .get(`/api/v1/customers/${crmCustomerId}/outstanding`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+        const outstanding = body<{ orders: { id: string }[]; repairs: { id: string }[] }>(response);
+
+        expect(outstanding.orders.some((o) => o.id === orderId)).toBe(true);
+        expect(outstanding.repairs.some((r) => r.id === repairId)).toBe(false);
+      });
+
+      it('sums what has actually been collected: 40.00 from the order and 60.00 from the repair', async () => {
+        const response = await request(context.server)
+          .get(`/api/v1/customers/${crmCustomerId}/lifetime-value`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+
+        expect(body<{ orderRevenue: string; repairRevenue: string; total: string }>(response)).toEqual({
+          orderRevenue: '40.00',
+          repairRevenue: '60.00',
+          total: '100.00',
+        });
+      });
+
+      it('merges the order, repair and notes into one timeline, newest first', async () => {
+        await request(context.server)
+          .post(`/api/v1/customers/${crmCustomerId}/notes`)
+          .set('Authorization', `Bearer ${staffToken}`)
+          .send({ body: 'Timeline marker' })
+          .expect(201);
+
+        const response = await request(context.server).get(`/api/v1/customers/${crmCustomerId}/timeline`).set('Authorization', `Bearer ${adminToken}`).expect(200);
+        const entries = body<{ type: string; id: string; timestamp: string }[]>(response);
+
+        expect(entries[0]?.type).toBe('NOTE');
+        expect(entries.some((e) => e.type === 'ORDER' && e.id === orderId)).toBe(true);
+        expect(entries.some((e) => e.type === 'REPAIR' && e.id === repairId)).toBe(true);
+        const timestamps = entries.map((e) => new Date(e.timestamp).getTime());
+        expect(timestamps).toEqual([...timestamps].sort((a, b) => b - a));
+      });
+    });
+
+    describe('tenant isolation', () => {
+      it('404s every CRM endpoint for a customer in another organization', async () => {
+        const otherOrgToken = (await signInAs(context, `${prefix.toLowerCase()}-other-org`, UserRole.ADMIN)).accessToken;
+
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/notes`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/addresses`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/purchase-history`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/repair-history`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/outstanding`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/lifetime-value`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+        await request(context.server).get(`/api/v1/customers/${crmCustomerId}/timeline`).set('Authorization', `Bearer ${otherOrgToken}`).expect(404);
+      });
     });
   });
 });

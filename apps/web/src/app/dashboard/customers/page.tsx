@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { EntityCrudPage } from '@/components/entity-crud/entity-crud-page';
 import type { Column, FormField } from '@/components/entity-crud/types';
 import { customersApi } from '@/features/customers/api';
@@ -8,7 +9,15 @@ import { useAuth } from '@/hooks/use-auth';
 
 const COLUMNS: Column<Customer>[] = [
   { key: 'customerCode', label: 'Code' },
-  { key: 'name', label: 'Name', render: (customer) => `${customer.firstName} ${customer.lastName}` },
+  {
+    key: 'name',
+    label: 'Name',
+    render: (customer) => (
+      <Link href={`/dashboard/customers/${customer.id}`} className="font-medium hover:underline">
+        {customer.firstName} {customer.lastName}
+      </Link>
+    ),
+  },
   { key: 'phone', label: 'Phone' },
   { key: 'email', label: 'Email', render: (customer) => customer.email ?? '-' },
 ];

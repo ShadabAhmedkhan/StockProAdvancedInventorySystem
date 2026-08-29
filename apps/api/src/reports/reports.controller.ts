@@ -1,8 +1,9 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 import { SalesReportQueryDto } from './dto/sales-report-query.dto';
 import { TopProductsQueryDto } from './dto/top-products-query.dto';
-import { ReportsService, type InventoryReport, type SalesReport, type TopProduct } from './reports.service';
+import { ReportsService, type AdvancedAnalytics, type InventoryReport, type SalesReport, type TopProduct } from './reports.service';
 
 @ApiBearerAuth('access-token')
 @ApiTags('Reports')
@@ -26,5 +27,11 @@ export class ReportsController {
   @ApiOperation({ summary: 'Best-selling products by revenue' })
   topProducts(@Query() query: TopProductsQueryDto): Promise<TopProduct[]> {
     return this.reportsService.topProducts(query);
+  }
+
+  @Get('analytics')
+  @ApiOperation({ summary: 'Sales, inventory, purchasing, repairs and finance analytics for a date range' })
+  analytics(@Query() query: AnalyticsQueryDto): Promise<AdvancedAnalytics> {
+    return this.reportsService.advancedAnalytics(query);
   }
 }
