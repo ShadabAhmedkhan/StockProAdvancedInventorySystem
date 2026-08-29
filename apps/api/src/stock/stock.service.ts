@@ -8,6 +8,7 @@ import { Prisma } from '../generated/prisma/client';
 import { AuditAction, AuditEntity, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
 import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { AdjustStockDto, ManualMovementType } from './dto/adjust-stock.dto';
+import type { ReorderQueryDto, ReorderSortField } from './dto/reorder-query.dto';
 import { StockStatusFilter, type StockQueryDto, type StockSortField } from './dto/stock-query.dto';
 import type { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 
@@ -42,6 +43,17 @@ const SORT_COLUMN: Readonly<Record<StockSortField, string>> = {
   updatedAt: 'i."updatedAt"',
 };
 
+/** Same reasoning as {@link SORT_COLUMN}: the ORDER BY fragment is picked from a fixed table, never built from caller input. */
+const REORDER_SORT_COLUMN: Readonly<Record<ReorderSortField, string>> = {
+  sku: '"sku"',
+  name: '"name"',
+  availableStock: '"availableStock"',
+  suggestedReorderQuantity: '"suggestedReorderQuantity"',
+};
+
+/** Days of sales history averaged into `averageDailyDemand`. Fixed and documented rather than configurable, keeping the first implementation deterministic per the spec. */
+const DEMAND_WINDOW_DAYS = 30;
+
 export type StockStatus = 'OK' | 'LOW' | 'OUT';
 
 /** A product with its stock level, as returned by the stock listing. */
@@ -65,6 +77,43 @@ export interface StockLevel {
   availableQuantity: number;
   stockStatus: StockStatus;
   updatedAt: Date;
+}
+
+/**
+ * One product's reorder picture, only computed for products with a
+ * `reorderPoint` set (see `ReorderQueryDto`'s `WHERE` clause).
+ *
+ * `suggestedReorderQuantity` is deterministic, per the spec: it never calls an
+ * LLM or any other non-reproducible input, just arithmetic over numbers this
+ * type already carries.
+ *
+ * ```text
+ * projectedAvailable      = availableStock + incomingStock
+ * effectiveTarget         = targetStock ?? (reorderPoint + safetyStock)
+ * suggestedReorderQuantity = projectedAvailable <= reorderPoint
+ *                              ? max(effectiveTarget - projectedAvailable, 0)
+ *                              : 0
+ * ```
+ */
+export interface ReorderSuggestion {
+  productId: string;
+  sku: string;
+  name: string;
+  quantity: number;
+  reservedQuantity: number;
+  availableStock: number;
+  /** Outstanding quantity on ORDERED/PARTIALLY_RECEIVED purchase orders. */
+  incomingStock: number;
+  /** Units sold per day, averaged over the trailing {@link DEMAND_WINDOW_DAYS}. */
+  averageDailyDemand: string;
+  reorderPoint: number;
+  /** Falls back to `reorderPoint + safetyStock` when the product has no explicit target. */
+  targetStock: number;
+  safetyStock: number;
+  leadTimeDays: number | null;
+  preferredSupplierId: string | null;
+  preferredSupplierName: string | null;
+  suggestedReorderQuantity: number;
 }
 
 export interface StockSummary {
@@ -216,6 +265,92 @@ export class StockService {
     ]);
 
     return paginate(items, total, query.page, query.limit);
+  }
+
+  /**
+   * Reorder suggestions: available/reserved/incoming stock, trailing average
+   * daily demand and a deterministic suggested reorder quantity, for every
+   * product that has a `reorderPoint` configured. See {@link ReorderSuggestion}
+   * for the exact formula - Phase 36 deliberately keeps this arithmetic, not
+   * an AI call, per the spec.
+   */
+  async findReorderSuggestions(query: ReorderQueryDto): Promise<Paginated<ReorderSuggestion>> {
+    const orgId = getCurrentOrgId();
+    const { skip, take } = pageWindow(query.page, query.limit);
+    const orderBy = Prisma.raw(REORDER_SORT_COLUMN[query.sortBy]);
+    const direction = Prisma.raw(query.sortOrder === 'asc' ? 'ASC' : 'DESC');
+    const needsReorderClause = query.needsReorderOnly
+      ? Prisma.sql`WHERE ("availableStock" + "incomingStock") <= "reorderPoint"`
+      : Prisma.empty;
+
+    const computedCte = Prisma.sql`
+      WITH incoming AS (
+        SELECT poi."productId" AS "productId", SUM(poi."quantity" - poi."receivedQuantity")::int AS "incomingStock"
+        FROM "PurchaseOrderItem" poi
+        JOIN "PurchaseOrder" po ON po."id" = poi."purchaseOrderId"
+        WHERE po."organizationId" = ${orgId}::uuid AND po."status" IN ('ORDERED', 'PARTIALLY_RECEIVED')
+        GROUP BY poi."productId"
+      ),
+      demand AS (
+        SELECT sm."productId" AS "productId", (SUM(sm."quantity")::numeric / ${DEMAND_WINDOW_DAYS})::numeric(14, 2) AS "averageDailyDemand"
+        FROM "StockMovement" sm
+        WHERE sm."organizationId" = ${orgId}::uuid
+          AND sm."type" = 'SALE'
+          AND sm."createdAt" >= NOW() - ${Prisma.raw(`INTERVAL '${String(DEMAND_WINDOW_DAYS)} days'`)}
+        GROUP BY sm."productId"
+      ),
+      computed AS (
+        SELECT
+          p."id"                                                            AS "productId",
+          p."sku",
+          p."name",
+          i."quantity",
+          i."reservedQuantity",
+          (i."quantity" - i."reservedQuantity")                             AS "availableStock",
+          COALESCE(inc."incomingStock", 0)                                  AS "incomingStock",
+          COALESCE(d."averageDailyDemand", 0)::text                         AS "averageDailyDemand",
+          p."reorderPoint"                                                  AS "reorderPoint",
+          COALESCE(p."targetStock", p."reorderPoint" + COALESCE(p."safetyStock", 0)) AS "targetStock",
+          COALESCE(p."safetyStock", 0)                                      AS "safetyStock",
+          p."supplierLeadTimeDays"                                          AS "leadTimeDays",
+          p."preferredSupplierId",
+          s."name"                                                          AS "preferredSupplierName"
+        FROM "Inventory" i
+        JOIN "Product" p ON p."id" = i."productId"
+        LEFT JOIN "Supplier" s ON s."id" = p."preferredSupplierId"
+        LEFT JOIN incoming inc ON inc."productId" = p."id"
+        LEFT JOIN demand d ON d."productId" = p."id"
+        WHERE i."organizationId" = ${orgId}::uuid
+          AND i."locationId" = ${defaultLocationSubquery()}
+          AND p."deletedAt" IS NULL
+          AND p."reorderPoint" IS NOT NULL
+      ),
+      suggested AS (
+        SELECT *,
+          CASE
+            WHEN ("availableStock" + "incomingStock") <= "reorderPoint"
+              THEN GREATEST("targetStock" - ("availableStock" + "incomingStock"), 0)
+            ELSE 0
+          END AS "suggestedReorderQuantity"
+        FROM computed
+      )
+    `;
+
+    const rows = await this.prisma.$queryRaw<ReorderSuggestion[]>`
+      ${computedCte}
+      SELECT * FROM suggested
+      ${needsReorderClause}
+      ORDER BY ${orderBy} ${direction}, "sku" ASC
+      LIMIT ${take} OFFSET ${skip}
+    `;
+
+    const [counted] = await this.prisma.$queryRaw<{ total: number }[]>`
+      ${computedCte}
+      SELECT COUNT(*)::int AS "total" FROM suggested
+      ${needsReorderClause}
+    `;
+
+    return paginate(rows, counted?.total ?? 0, query.page, query.limit);
   }
 
   /**

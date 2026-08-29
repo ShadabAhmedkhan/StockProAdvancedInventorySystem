@@ -117,7 +117,7 @@ describe('ProductsService', () => {
       await service.findAll(query());
 
       const { include } = firstCallArg(productFindMany) as { include: Record<string, unknown> };
-      expect(Object.keys(include)).toEqual(['category', 'brand', 'inventory']);
+      expect(Object.keys(include)).toEqual(['category', 'brand', 'preferredSupplier', 'inventory']);
     });
 
     it('returns page metadata alongside the items', async () => {

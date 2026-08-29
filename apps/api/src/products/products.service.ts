@@ -28,6 +28,7 @@ import type { UpdateProductDto } from './dto/update-product.dto';
 const PRODUCT_INCLUDE = {
   category: { select: { id: true, name: true, slug: true } },
   brand: { select: { id: true, name: true, slug: true } },
+  preferredSupplier: { select: { id: true, name: true } },
   inventory: { select: { quantity: true, reservedQuantity: true, updatedAt: true }, take: 1 },
 } as const;
 
@@ -96,6 +97,7 @@ export class ProductsService {
     await this.assertBarcodeAvailable(dto.barcode);
     await this.assertCategoryExists(dto.categoryId);
     await this.assertBrandExists(dto.brandId);
+    await this.assertSupplierExists(dto.preferredSupplierId);
 
     const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -118,6 +120,11 @@ export class ProductsService {
           storage: dto.storage ?? null,
           condition: dto.condition,
           warrantyMonths: dto.warrantyMonths ?? null,
+          reorderPoint: dto.reorderPoint ?? null,
+          targetStock: dto.targetStock ?? null,
+          safetyStock: dto.safetyStock ?? null,
+          supplierLeadTimeDays: dto.supplierLeadTimeDays ?? null,
+          preferredSupplierId: dto.preferredSupplierId ?? null,
         },
         select: { id: true },
       });
@@ -151,6 +158,9 @@ export class ProductsService {
     if (dto.brandId !== undefined) {
       await this.assertBrandExists(dto.brandId);
     }
+    if (dto.preferredSupplierId !== undefined) {
+      await this.assertSupplierExists(dto.preferredSupplierId);
+    }
 
     const data = {
       ...(dto.sku === undefined ? {} : { sku: dto.sku }),
@@ -170,6 +180,11 @@ export class ProductsService {
       ...(dto.storage === undefined ? {} : { storage: dto.storage }),
       ...(dto.condition === undefined ? {} : { condition: dto.condition }),
       ...(dto.warrantyMonths === undefined ? {} : { warrantyMonths: dto.warrantyMonths }),
+      ...(dto.reorderPoint === undefined ? {} : { reorderPoint: dto.reorderPoint }),
+      ...(dto.targetStock === undefined ? {} : { targetStock: dto.targetStock }),
+      ...(dto.safetyStock === undefined ? {} : { safetyStock: dto.safetyStock }),
+      ...(dto.supplierLeadTimeDays === undefined ? {} : { supplierLeadTimeDays: dto.supplierLeadTimeDays }),
+      ...(dto.preferredSupplierId === undefined ? {} : { preferredSupplierId: dto.preferredSupplierId }),
     };
 
     await this.prisma.product.update({ where: { id }, data });
@@ -289,6 +304,22 @@ export class ProductsService {
         code: ErrorCode.VALIDATION_ERROR,
         message: 'Validation failed',
         errors: [{ field: 'brandId', constraints: ['brandId must reference an existing brand'] }],
+      });
+    }
+  }
+
+  private async assertSupplierExists(supplierId: string | undefined): Promise<void> {
+    if (supplierId === undefined) {
+      return;
+    }
+
+    const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId }, select: { deletedAt: true } });
+
+    if (supplier?.deletedAt !== null) {
+      throw new BadRequestException({
+        code: ErrorCode.VALIDATION_ERROR,
+        message: 'Validation failed',
+        errors: [{ field: 'preferredSupplierId', constraints: ['preferredSupplierId must reference an existing supplier'] }],
       });
     }
   }

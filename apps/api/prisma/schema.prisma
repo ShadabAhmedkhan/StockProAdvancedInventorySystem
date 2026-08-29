@@ -477,6 +477,7 @@ model Supplier {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   purchaseOrders PurchaseOrder[]
+  preferredByProducts Product[]
 
   @@unique([organizationId, supplierCode])
   @@index([organizationId])
@@ -547,15 +548,24 @@ model Product {
   storage        String?   @db.VarChar(60)
   condition      ProductCondition @default(NEW)
   warrantyMonths Int?
+  /// Reorder planning fields (Phase 36). All optional: a product with no
+  /// `reorderPoint` set is simply excluded from reorder suggestions rather
+  /// than forcing every product in the catalogue to carry a planning policy.
+  reorderPoint         Int?
+  targetStock          Int?
+  safetyStock          Int?
+  supplierLeadTimeDays Int?
+  preferredSupplierId  String? @db.Uuid
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   deletedAt      DateTime?
 
   // Restrict: a category or brand that is still in use must be soft-deleted,
   // never dropped out from under its products.
-  category     Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  brand        Brand?       @relation(fields: [brandId], references: [id], onDelete: Restrict)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category          Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  brand             Brand?       @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  preferredSupplier Supplier?    @relation(fields: [preferredSupplierId], references: [id], onDelete: Restrict)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   inventory      Inventory[]
   stockMovements StockMovement[]
@@ -576,6 +586,7 @@ model Product {
   @@index([name])
   @@index([deletedAt])
   @@index([createdAt])
+  @@index([preferredSupplierId])
 }
 
 // ---------------------------------------------------------------------------

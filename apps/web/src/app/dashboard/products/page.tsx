@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { brandsApi, categoriesApi, productsApi, type ProductSortField } from '@/features/products/api';
 import { ProductFormDialog } from '@/features/products/components/product-form-dialog';
+import { suppliersApi } from '@/features/suppliers/api';
 import { StockStatusBadge } from '@/features/products/components/stock-status-badge';
 import { stockStatusFor } from '@/features/products/labels';
 import type { Product } from '@/features/products/types';
@@ -46,8 +47,10 @@ export default function ProductsPage(): React.JSX.Element {
 
   const categoriesQuery = useQuery({ queryKey: ['categories'], queryFn: categoriesApi.list });
   const brandsQuery = useQuery({ queryKey: ['brands'], queryFn: brandsApi.list });
+  const suppliersQuery = useQuery({ queryKey: ['suppliers-picker'], queryFn: () => suppliersApi.list({ page: 1, search: '', includeDeleted: false }) });
   const categories = categoriesQuery.data?.items ?? [];
   const brands = brandsQuery.data?.items ?? [];
+  const suppliers = suppliersQuery.data?.items ?? [];
 
   const productsQuery = useQuery({
     queryKey: ['products', page, search, categoryId, brandId, includeDeleted, sortBy, sortOrder],
@@ -255,6 +258,7 @@ export default function ProductsPage(): React.JSX.Element {
         product={editingProduct}
         categories={categories}
         brands={brands}
+        suppliers={suppliers}
         onSubmit={async (input) => {
           if (editingProduct === null) {
             await productsApi.create(input);

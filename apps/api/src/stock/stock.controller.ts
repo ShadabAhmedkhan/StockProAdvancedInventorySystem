@@ -6,9 +6,10 @@ import type { AuthenticatedUser } from '../common/interfaces/authenticated-user.
 import type { Paginated } from '../common/pagination/paginated';
 import { UserRole } from '../generated/prisma/enums';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
+import { ReorderQueryDto } from './dto/reorder-query.dto';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { StockQueryDto } from './dto/stock-query.dto';
-import { StockService, type MovementWithContext, type StockAdjustmentResult, type StockLevel, type StockSummary } from './stock.service';
+import { StockService, type MovementWithContext, type ReorderSuggestion, type StockAdjustmentResult, type StockLevel, type StockSummary } from './stock.service';
 
 /**
  * Everyone may read stock levels - selling, repairing and reordering all need
@@ -40,6 +41,12 @@ export class StockController {
   @ApiOperation({ summary: 'The stock movement ledger' })
   findMovements(@Query() query: StockMovementQueryDto): Promise<Paginated<MovementWithContext>> {
     return this.stockService.findMovements(query);
+  }
+
+  @Get('reorder-suggestions')
+  @ApiOperation({ summary: 'Deterministic reorder suggestions for products with a reorder point configured' })
+  findReorderSuggestions(@Query() query: ReorderQueryDto): Promise<Paginated<ReorderSuggestion>> {
+    return this.stockService.findReorderSuggestions(query);
   }
 
   @Roles(UserRole.ADMIN, UserRole.MANAGER)

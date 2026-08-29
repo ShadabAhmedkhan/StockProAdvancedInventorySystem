@@ -98,4 +98,35 @@ export class CreateProductDto {
   @Min(0)
   @IsOptional()
   warrantyMonths?: number;
+
+  /** The on-hand + incoming level at or below which this product should be reordered. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  reorderPoint?: number;
+
+  /** The level a reorder should bring stock back up to. Defaults to `reorderPoint + safetyStock` when unset. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  targetStock?: number;
+
+  /** A buffer held against demand variability, folded into the default `targetStock`. */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  safetyStock?: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  supplierLeadTimeDays?: number;
+
+  @IsUUID()
+  @IsOptional()
+  preferredSupplierId?: string;
 }

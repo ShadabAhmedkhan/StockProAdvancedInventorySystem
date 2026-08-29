@@ -40,11 +40,17 @@ export interface Product {
   storage: string | null;
   condition: ProductCondition;
   warrantyMonths: number | null;
+  reorderPoint: number | null;
+  targetStock: number | null;
+  safetyStock: number | null;
+  supplierLeadTimeDays: number | null;
+  preferredSupplierId: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
   category: { id: string; name: string; slug: string };
   brand: { id: string; name: string; slug: string } | null;
+  preferredSupplier: { id: string; name: string } | null;
   inventory: { quantity: number; reservedQuantity: number; updatedAt: string } | null;
 }
 
@@ -108,6 +114,24 @@ export interface StockMovement {
   createdAt: string;
   product: { id: string; sku: string; name: string };
   createdBy: { id: string; firstName: string; lastName: string };
+}
+
+export interface ReorderSuggestion {
+  productId: string;
+  sku: string;
+  name: string;
+  quantity: number;
+  reservedQuantity: number;
+  availableStock: number;
+  incomingStock: number;
+  averageDailyDemand: string;
+  reorderPoint: number;
+  targetStock: number;
+  safetyStock: number;
+  leadTimeDays: number | null;
+  preferredSupplierId: string | null;
+  preferredSupplierName: string | null;
+  suggestedReorderQuantity: number;
 }
 
 export interface StockAdjustmentResult {

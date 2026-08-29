@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { errorMessage } from '@/lib/error-message';
+import type { Supplier } from '@/features/suppliers/types';
 import type { ProductInput } from '../api';
 import type { Brand, Category, Product } from '../types';
 
@@ -18,6 +19,7 @@ interface ProductFormDialogProps {
   product: Product | null;
   categories: Category[];
   brands: Brand[];
+  suppliers: Supplier[];
   onSubmit: (input: ProductInput) => Promise<unknown>;
 }
 
@@ -41,6 +43,11 @@ function defaultValues(product: Product | null): ProductInput {
       storage: '',
       condition: 'NEW',
       warrantyMonths: undefined,
+      reorderPoint: undefined,
+      targetStock: undefined,
+      safetyStock: undefined,
+      supplierLeadTimeDays: undefined,
+      preferredSupplierId: '',
     };
   }
   return {
@@ -61,16 +68,21 @@ function defaultValues(product: Product | null): ProductInput {
     storage: product.storage ?? '',
     condition: product.condition,
     warrantyMonths: product.warrantyMonths ?? undefined,
+    reorderPoint: product.reorderPoint ?? undefined,
+    targetStock: product.targetStock ?? undefined,
+    safetyStock: product.safetyStock ?? undefined,
+    supplierLeadTimeDays: product.supplierLeadTimeDays ?? undefined,
+    preferredSupplierId: product.preferredSupplierId ?? '',
   };
 }
 
-export function ProductFormDialog({ open, onClose, product, categories, brands, onSubmit }: ProductFormDialogProps): React.JSX.Element {
+export function ProductFormDialog({ open, onClose, product, categories, brands, suppliers, onSubmit }: ProductFormDialogProps): React.JSX.Element {
   return (
     <Dialog open={open} onClose={onClose} title={product === null ? 'New product' : 'Edit product'} className="max-w-lg">
       {open && (
         // Keyed by identity so opening for a different product (or a fresh "New") remounts the
         // form with clean state, instead of resetting state from an effect on prop change.
-        <ProductForm key={product?.id ?? 'new'} product={product} categories={categories} brands={brands} onClose={onClose} onSubmit={onSubmit} />
+        <ProductForm key={product?.id ?? 'new'} product={product} categories={categories} brands={brands} suppliers={suppliers} onClose={onClose} onSubmit={onSubmit} />
       )}
     </Dialog>
   );
@@ -80,11 +92,12 @@ interface ProductFormProps {
   product: Product | null;
   categories: Category[];
   brands: Brand[];
+  suppliers: Supplier[];
   onClose: () => void;
   onSubmit: (input: ProductInput) => Promise<unknown>;
 }
 
-function ProductForm({ product, categories, brands, onClose, onSubmit }: ProductFormProps): React.JSX.Element {
+function ProductForm({ product, categories, brands, suppliers, onClose, onSubmit }: ProductFormProps): React.JSX.Element {
   const [values, setValues] = useState<ProductInput>(defaultValues(product));
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -330,6 +343,79 @@ function ProductForm({ product, categories, brands, onClose, onSubmit }: Product
               set('warrantyMonths', event.target.value === '' ? undefined : Number(event.target.value));
             }}
           />
+        </div>
+      </div>
+
+      <div className="space-y-3 rounded-md border border-border p-3">
+        <p className="text-sm font-medium">Reorder planning</p>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="reorderPoint">Reorder point</Label>
+            <Input
+              id="reorderPoint"
+              type="number"
+              min={0}
+              value={values.reorderPoint ?? ''}
+              onChange={(event) => {
+                set('reorderPoint', event.target.value === '' ? undefined : Number(event.target.value));
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="targetStock">Target stock</Label>
+            <Input
+              id="targetStock"
+              type="number"
+              min={0}
+              value={values.targetStock ?? ''}
+              onChange={(event) => {
+                set('targetStock', event.target.value === '' ? undefined : Number(event.target.value));
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="safetyStock">Safety stock</Label>
+            <Input
+              id="safetyStock"
+              type="number"
+              min={0}
+              value={values.safetyStock ?? ''}
+              onChange={(event) => {
+                set('safetyStock', event.target.value === '' ? undefined : Number(event.target.value));
+              }}
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="supplierLeadTimeDays">Supplier lead time (days)</Label>
+            <Input
+              id="supplierLeadTimeDays"
+              type="number"
+              min={0}
+              value={values.supplierLeadTimeDays ?? ''}
+              onChange={(event) => {
+                set('supplierLeadTimeDays', event.target.value === '' ? undefined : Number(event.target.value));
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="preferredSupplierId">Preferred supplier</Label>
+            <Select
+              id="preferredSupplierId"
+              value={values.preferredSupplierId}
+              onChange={(event) => {
+                set('preferredSupplierId', event.target.value);
+              }}
+            >
+              <option value="">None</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
       </div>
 

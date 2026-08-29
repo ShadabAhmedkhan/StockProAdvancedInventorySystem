@@ -7,6 +7,7 @@ import type {
   ProductTrackingType,
   ProductUnit,
   ProductUnitStatus,
+  ReorderSuggestion,
   StockAdjustmentResult,
   StockLevel,
   StockMovement,
@@ -55,6 +56,11 @@ export interface ProductInput {
   storage?: string;
   condition?: ProductCondition;
   warrantyMonths?: number;
+  reorderPoint?: number;
+  targetStock?: number;
+  safetyStock?: number;
+  supplierLeadTimeDays?: number;
+  preferredSupplierId?: string;
 }
 
 /** Omits keys the API rejects on an optional field when empty (`@IsOptional` still validates a present empty string). */
@@ -114,6 +120,18 @@ export const productUnitsApi = {
   remove: async (id: string): Promise<void> => {
     await apiClient.delete(`/product-units/${id}`);
   },
+};
+
+export interface ReorderListParams {
+  page: number;
+  needsReorderOnly: boolean;
+  sortBy?: 'sku' | 'name' | 'availableStock' | 'suggestedReorderQuantity';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export const reorderApi = {
+  list: ({ page, needsReorderOnly, sortBy, sortOrder }: ReorderListParams): Promise<PaginatedResult<ReorderSuggestion>> =>
+    apiClient.getPaginated<ReorderSuggestion>(`/stock/reorder-suggestions${query({ page, limit: 20, needsReorderOnly, sortBy, sortOrder })}`),
 };
 
 export const stockApi = {
