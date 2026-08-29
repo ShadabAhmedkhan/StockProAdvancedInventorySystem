@@ -10,6 +10,7 @@ import { Prisma, type Payment, type RepairStatusHistory } from '../generated/pri
 import {
   AuditAction,
   AuditEntity,
+  NotificationType,
   PaymentReferenceType,
   RepairStatus,
   StockMovementType,
@@ -19,6 +20,7 @@ import {
   UserRole,
   UserStatus,
 } from '../generated/prisma/enums';
+import { notify } from '../notifications/notify';
 import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { ChangeRepairStatusDto } from './dto/change-repair-status.dto';
 import type { CreateRepairItemDto } from './dto/create-repair-item.dto';
@@ -184,7 +186,7 @@ export class RepairsService {
    */
   async changeStatus(id: string, dto: ChangeRepairStatusDto, userId: string): Promise<RepairDetail> {
     await this.prisma.$transaction(async (tx) => {
-      const current = await tx.repair.findUnique({ where: { id }, select: { status: true, finalCost: true } });
+      const current = await tx.repair.findUnique({ where: { id }, select: { status: true, finalCost: true, technicianId: true, repairNumber: true } });
 
       if (current === null) {
         throw new NotFoundException({ code: ErrorCode.NOT_FOUND, message: 'Repair not found' });
@@ -229,6 +231,16 @@ export class RepairsService {
           referenceType: StockReferenceType.REPAIR,
           referenceId: id,
           userId,
+        });
+
+        await notify(tx, {
+          organizationId: getCurrentOrgId(),
+          type: NotificationType.REPAIR_READY,
+          title: 'Repair ready for pickup',
+          message: `Repair ${current.repairNumber} is ready for the customer`,
+          entityType: 'REPAIR',
+          entityId: id,
+          extraUserIds: current.technicianId === null ? [] : [current.technicianId],
         });
       }
 

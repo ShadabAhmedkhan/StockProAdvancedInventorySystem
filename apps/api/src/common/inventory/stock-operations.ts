@@ -3,7 +3,8 @@ import type { TenantTransactionClient } from '../../prisma/tenant-prisma.provide
 import { getCurrentOrgId } from '../tenant/tenant-context';
 import { ErrorCode } from '../enums/error-code.enum';
 import type { Prisma } from '../../generated/prisma/client';
-import type { StockMovementType, StockReferenceType } from '../../generated/prisma/enums';
+import { NotificationType, type StockMovementType, type StockReferenceType } from '../../generated/prisma/enums';
+import { notify } from '../../notifications/notify';
 
 /**
  * How a document moves stock.
@@ -111,6 +112,7 @@ export async function consumeStock(
 ): Promise<void> {
   const resolvedLocationId = locationId ?? (await getDefaultLocationId(tx));
   const movements: Prisma.StockMovementCreateManyInput[] = [];
+  const newQuantities = new Map<string, number>();
 
   for (const line of inProductOrder(lines)) {
     const rows = await tx.$queryRaw<{ quantity: number }[]>`
@@ -144,9 +146,58 @@ export async function consumeStock(
       referenceId: context.referenceId,
       createdById: context.userId,
     });
+    newQuantities.set(line.productId, row.quantity);
   }
 
   await tx.stockMovement.createMany({ data: movements });
+  await notifyLowStock(tx, newQuantities);
+}
+
+/**
+ * Fires LOW_STOCK/OUT_OF_STOCK once a consumption drops a product's new
+ * quantity to or below its `minimumStock`. Shared by every `consumeStock`
+ * caller (orders, repairs, transfers) and by the manual stock adjustment
+ * endpoint, so a threshold crossing is reported the same way regardless of
+ * which document caused it.
+ */
+export async function notifyLowStock(tx: Prisma.TransactionClient | TenantTransactionClient, newQuantities: ReadonlyMap<string, number>): Promise<void> {
+  if (newQuantities.size === 0) {
+    return;
+  }
+
+  // Cast rather than call through the raw union: TS's overload resolution for
+  // `Prisma.TransactionClient | TenantTransactionClient` blows its recursion
+  // budget ("Excessive stack depth") once a fourth distinct model delegate is
+  // reached through it in the same file. Both types support this call
+  // identically at runtime - the tenant extension only adds a `where` clause,
+  // it does not remove or reshape any method - so this is purely a type-level
+  // escape, not a behaviour change.
+  const products = await (tx as Prisma.TransactionClient).product.findMany({
+    where: { id: { in: [...newQuantities.keys()] } },
+    select: { id: true, sku: true, name: true, minimumStock: true },
+  });
+
+  const organizationId = getCurrentOrgId();
+
+  for (const product of products) {
+    const quantity = newQuantities.get(product.id);
+    if (quantity === undefined || quantity > product.minimumStock) {
+      continue;
+    }
+
+    const type = quantity <= 0 ? NotificationType.OUT_OF_STOCK : NotificationType.LOW_STOCK;
+    await notify(tx, {
+      organizationId,
+      type,
+      title: type === NotificationType.OUT_OF_STOCK ? 'Out of stock' : 'Low stock',
+      message:
+        type === NotificationType.OUT_OF_STOCK
+          ? `${product.name} (${product.sku}) is out of stock`
+          : `${product.name} (${product.sku}) is low on stock: ${String(quantity)} left`,
+      entityType: 'PRODUCT',
+      entityId: product.id,
+    });
+  }
 }
 
 /**

@@ -6,7 +6,8 @@ import { ErrorCode } from '../common/enums/error-code.enum';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma, type GoodsReceipt } from '../generated/prisma/client';
-import { AuditAction, AuditEntity, PurchaseOrderStatus, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
+import { AuditAction, AuditEntity, NotificationType, PurchaseOrderStatus, StockMovementType, StockReferenceType } from '../generated/prisma/enums';
+import { notify } from '../notifications/notify';
 import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { CreateGoodsReceiptDto } from './dto/create-goods-receipt.dto';
 import type { CreatePurchaseOrderItemDto } from './dto/create-purchase-order-item.dto';
@@ -298,10 +299,22 @@ export class PurchaseOrdersService {
       const items = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: id }, select: { quantity: true, receivedQuantity: true } });
       const fullyReceived = items.every((row) => row.receivedQuantity >= row.quantity);
 
-      await tx.purchaseOrder.update({
+      const updated = await tx.purchaseOrder.update({
         where: { id },
         data: { status: fullyReceived ? PurchaseOrderStatus.RECEIVED : PurchaseOrderStatus.PARTIALLY_RECEIVED },
+        select: { poNumber: true },
       });
+
+      if (fullyReceived) {
+        await notify(tx, {
+          organizationId: getCurrentOrgId(),
+          type: NotificationType.PURCHASE_RECEIVED,
+          title: 'Purchase order received',
+          message: `Purchase order ${updated.poNumber} is fully received`,
+          entityType: 'PURCHASE_ORDER',
+          entityId: id,
+        });
+      }
 
       return tx.goodsReceipt.findUniqueOrThrow({ where: { id: goodsReceipt.id } });
     });

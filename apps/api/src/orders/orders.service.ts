@@ -9,6 +9,7 @@ import { Prisma, type Payment } from '../generated/prisma/client';
 import {
   AuditAction,
   AuditEntity,
+  NotificationType,
   OrderStatus,
   PaymentReferenceType,
   StockMovementType,
@@ -16,6 +17,7 @@ import {
   TransactionReferenceType,
   TransactionType,
 } from '../generated/prisma/enums';
+import { notify } from '../notifications/notify';
 import { TENANT_PRISMA, type TenantPrismaClient, type TenantTransactionClient } from '../prisma/tenant-prisma.provider';
 import type { CreateOrderItemDto } from './dto/create-order-item.dto';
 import type { CreatePaymentDto } from '../common/dto/create-payment.dto';
@@ -203,6 +205,16 @@ export class OrdersService {
       });
 
       await this.auditService.record({ userId, action: AuditAction.ORDER_COMPLETED, entity: AuditEntity.ORDER, entityId: id }, tx);
+
+      const order = await tx.order.findUniqueOrThrow({ where: { id }, select: { orderNumber: true, total: true } });
+      await notify(tx, {
+        organizationId: getCurrentOrgId(),
+        type: NotificationType.ORDER_COMPLETED,
+        title: 'Sale completed',
+        message: `Order ${order.orderNumber} completed for ${order.total.toFixed(2)}`,
+        entityType: 'ORDER',
+        entityId: id,
+      });
     });
 
     return this.findOne(id);

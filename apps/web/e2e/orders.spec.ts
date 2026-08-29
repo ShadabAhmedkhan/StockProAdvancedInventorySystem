@@ -37,7 +37,7 @@ test.describe('orders', () => {
     await page.getByRole('button', { name: 'New sale' }).click();
     await page.waitForURL('**/dashboard/orders/*');
 
-    await page.getByPlaceholder('Search products by SKU or name to add a line').fill(PRODUCT_SKU);
+    await page.getByPlaceholder('Scan a barcode or search by SKU/name').fill(PRODUCT_SKU);
     await page.getByText(PRODUCT_NAME).click();
     await expect(page.getByRole('button', { name: 'Confirm order' })).toBeEnabled();
 

@@ -26,7 +26,7 @@ test.describe('product units', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
 
     await page.goto('/dashboard/product-units');
-    await page.getByPlaceholder('Search products by SKU or name to add a line').fill(sku);
+    await page.getByPlaceholder('Scan a barcode or search by SKU/name').fill(sku);
     await page.getByText(name, { exact: false }).click();
     await page.getByPlaceholder('Serial number or IMEI', { exact: true }).fill(serialNumber);
     await page.getByRole('button', { name: 'Register' }).click();

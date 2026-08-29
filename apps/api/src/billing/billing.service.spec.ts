@@ -29,7 +29,12 @@ function service(overrides: { secretKey?: string; webhookSecret?: string; priceI
   const organizationFindUnique = jest.fn();
   const organizationUpdate = jest.fn();
 
-  const prisma = { organization: { findUniqueOrThrow: organizationFindUniqueOrThrow, findUnique: organizationFindUnique, update: organizationUpdate } } as unknown as PrismaService;
+  const prisma = {
+    organization: { findUniqueOrThrow: organizationFindUniqueOrThrow, findUnique: organizationFindUnique, update: organizationUpdate },
+    // A payment failure fans out a SUBSCRIPTION_PAYMENT_FAILED notification to the org's admins.
+    user: { findMany: jest.fn(() => Promise.resolve([])) },
+    notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
+  } as unknown as PrismaService;
 
   const config: StripeConfiguration = { secretKey: 'sk_test_123', webhookSecret: 'whsec_123', priceId: 'price_123', ...overrides };
   const app = { corsOrigins: [BASE_URL] } as AppConfiguration;

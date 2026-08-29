@@ -4,7 +4,8 @@ import Stripe from 'stripe';
 import { ErrorCode } from '../common/enums/error-code.enum';
 import { appConfig } from '../config/app.config';
 import { stripeConfig } from '../config/stripe.config';
-import { SubscriptionStatus } from '../generated/prisma/enums';
+import { NotificationType, SubscriptionStatus } from '../generated/prisma/enums';
+import { notify } from '../notifications/notify';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -163,23 +164,39 @@ export class BillingService {
     if (invoice.customer === null) {
       return;
     }
-    await this.updateByCustomerId(invoice.customer, undefined, SubscriptionStatus.PAST_DUE);
+    const organizationId = await this.updateByCustomerId(invoice.customer, undefined, SubscriptionStatus.PAST_DUE);
+    if (organizationId === null) {
+      return;
+    }
+
+    await notify(this.prisma, {
+      organizationId,
+      type: NotificationType.SUBSCRIPTION_PAYMENT_FAILED,
+      title: 'Subscription payment failed',
+      message: 'A subscription payment failed - update your billing details to avoid losing access',
+    });
   }
 
-  /** `undefined` leaves `stripeSubscriptionId` untouched; `null` explicitly clears it. */
-  private async updateByCustomerId(customer: string | Stripe.Customer | Stripe.DeletedCustomer, stripeSubscriptionId: string | null | undefined, subscriptionStatus: SubscriptionStatus): Promise<void> {
+  /** `undefined` leaves `stripeSubscriptionId` untouched; `null` explicitly clears it. Returns the organization id updated, or `null` if the customer is unrecognised. */
+  private async updateByCustomerId(
+    customer: string | Stripe.Customer | Stripe.DeletedCustomer,
+    stripeSubscriptionId: string | null | undefined,
+    subscriptionStatus: SubscriptionStatus,
+  ): Promise<string | null> {
     const customerId = typeof customer === 'string' ? customer : customer.id;
 
     const organization = await this.prisma.organization.findUnique({ where: { stripeCustomerId: customerId }, select: { id: true } });
     if (organization === null) {
       this.logger.warn(`No organization found for Stripe customer ${customerId}`);
-      return;
+      return null;
     }
 
     await this.prisma.organization.update({
       where: { id: organization.id },
       data: { subscriptionStatus, ...(stripeSubscriptionId === undefined ? {} : { stripeSubscriptionId }) },
     });
+
+    return organization.id;
   }
 
   private mapStatus(status: Stripe.Subscription.Status): SubscriptionStatus {

@@ -24,8 +24,10 @@ function decimal(value: string): Prisma.Decimal {
 function repairRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     id: REPAIR_ID,
+    repairNumber: 'REP-00000042',
     status: RepairStatus.IN_PROGRESS,
     finalCost: decimal('120.00'),
+    technicianId: null,
     items: [],
     payments: [],
     statusHistory: [],
@@ -115,9 +117,10 @@ describe('RepairsService', () => {
       repair: { create: repairCreate, update: repairUpdate, findUnique: repairFindUnique, findMany: repairFindMany, count: repairCount },
       repairItem: { create: itemCreate, update: itemUpdate, delete: itemDelete, findMany: itemFindMany, findUnique: itemFindUnique },
       repairStatusHistory: { create: historyCreate, findMany: jest.fn(() => Promise.resolve([])) },
-      product: { findUnique: productFindUnique },
+      product: { findUnique: productFindUnique, findMany: jest.fn(() => Promise.resolve([])) },
       customer: { findUnique: customerFindUnique },
-      user: { findUnique: userFindUnique },
+      user: { findUnique: userFindUnique, findMany: jest.fn(() => Promise.resolve([])) },
+      notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
       payment: { create: paymentCreate, aggregate: paymentAggregate, findMany: jest.fn(() => Promise.resolve([])) },
       financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },

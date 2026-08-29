@@ -154,6 +154,17 @@ enum TransactionReferenceType {
   EXPENSE
 }
 
+enum NotificationType {
+  LOW_STOCK
+  OUT_OF_STOCK
+  REPAIR_READY
+  REPAIR_OVERDUE
+  ORDER_COMPLETED
+  PURCHASE_RECEIVED
+  TRIAL_EXPIRING
+  SUBSCRIPTION_PAYMENT_FAILED
+}
+
 enum AuditAction {
   CREATE
   UPDATE
@@ -332,6 +343,7 @@ model Organization {
   stockTransfers        StockTransfer[]
   productUnits          ProductUnit[]
   stockCounts           StockCount[]
+  notifications         Notification[]
 
   @@index([subscriptionStatus])
 }
@@ -385,6 +397,7 @@ model User {
   stockTransfersCreated StockTransfer[]
   stockCountsCreated    StockCount[]           @relation("StockCountCreatedBy")
   stockCountsApproved   StockCount[]           @relation("StockCountApprovedBy")
+  notifications         Notification[]
 
   @@index([organizationId])
   @@index([role])
@@ -1287,4 +1300,32 @@ model Setting {
 
   @@unique([organizationId, key])
   @@index([organizationId])
+}
+
+/// In-app notifications fanned out to the users who act on a business event
+/// (an ADMIN/MANAGER for most events, plus the assigned technician for a
+/// repair). Delivery is deliberately just this one row today - a future
+/// email/SMS/push channel reads the same row rather than needing its own
+/// model, per the "keep delivery channels abstract" instruction.
+model Notification {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  organizationId String           @db.Uuid
+  userId         String           @db.Uuid
+  type           NotificationType
+  title          String           @db.VarChar(200)
+  message        String           @db.VarChar(1000)
+  /// What this notification is about, e.g. entityType "REPAIR" + entityId the
+  /// repair's id, so the UI can link straight to the record. Null for
+  /// organization-wide events (a trial expiring) with no single record.
+  entityType     String?          @db.VarChar(40)
+  entityId       String?          @db.Uuid
+  isRead         Boolean          @default(false)
+  readAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId, isRead, createdAt])
+  @@index([entityType, entityId])
 }

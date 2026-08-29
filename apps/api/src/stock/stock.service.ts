@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ErrorCode } from '../common/enums/error-code.enum';
-import { getDefaultLocationId } from '../common/inventory/stock-operations';
+import { getDefaultLocationId, notifyLowStock } from '../common/inventory/stock-operations';
 import { pageWindow, paginate, type Paginated } from '../common/pagination/paginated';
 import { getCurrentOrgId } from '../common/tenant/tenant-context';
 import { Prisma } from '../generated/prisma/client';
@@ -432,6 +432,10 @@ export class StockService {
         },
         tx,
       );
+
+      if (delta < 0) {
+        await notifyLowStock(tx, new Map([[dto.productId, inventory.quantity]]));
+      }
 
       return {
         productId: dto.productId,

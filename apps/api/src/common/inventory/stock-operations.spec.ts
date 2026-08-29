@@ -30,6 +30,9 @@ describe('stock operations', () => {
   let inventoryFindUnique: jest.Mock;
   let createMany: jest.Mock;
   let locationFindFirstOrThrow: jest.Mock;
+  let productFindMany: jest.Mock;
+  let userFindMany: jest.Mock;
+  let notificationCreateMany: jest.Mock;
   let tx: Prisma.TransactionClient;
 
   const LOCATION_ID = '99999999-0000-4000-8000-000000000009';
@@ -54,6 +57,12 @@ describe('stock operations', () => {
     inventoryFindUnique = jest.fn(() => Promise.resolve({ quantity: 1, reservedQuantity: 0 }));
     createMany = jest.fn(() => Promise.resolve({ count: 2 }));
     locationFindFirstOrThrow = jest.fn(() => Promise.resolve({ id: LOCATION_ID }));
+    // Stock consumption below its minimum would fire a LOW_STOCK/OUT_OF_STOCK
+    // notification; returning no products keeps these unrelated tests from
+    // needing to also stub the user/notification fan-out.
+    productFindMany = jest.fn(() => Promise.resolve([]));
+    userFindMany = jest.fn(() => Promise.resolve([]));
+    notificationCreateMany = jest.fn(() => Promise.resolve({ count: 0 }));
 
     tx = {
       $executeRaw: executeRaw,
@@ -61,6 +70,9 @@ describe('stock operations', () => {
       inventory: { findUnique: inventoryFindUnique },
       stockMovement: { createMany },
       location: { findFirstOrThrow: locationFindFirstOrThrow },
+      product: { findMany: productFindMany },
+      user: { findMany: userFindMany },
+      notification: { createMany: notificationCreateMany },
     } as unknown as Prisma.TransactionClient;
   });
 

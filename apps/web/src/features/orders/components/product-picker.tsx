@@ -36,10 +36,22 @@ export function ProductPicker({ onSelect }: ProductPickerProps): React.JSX.Eleme
   return (
     <div className="relative">
       <Input
-        placeholder="Search products by SKU or name to add a line"
+        placeholder="Scan a barcode or search by SKU/name"
         value={input}
         onChange={(event) => {
           setInput(event.target.value);
+        }}
+        onKeyDown={(event) => {
+          // A barcode scanner types the code then sends Enter; an exact SKU/barcode match
+          // should add immediately rather than waiting for the user to click a result.
+          if (event.key !== 'Enter') return;
+          const exact = results.find((product) => product.sku === input || product.barcode === input);
+          if (exact !== undefined) {
+            event.preventDefault();
+            onSelect(exact);
+            setInput('');
+            setSearch('');
+          }
         }}
       />
       {search.trim() !== '' && (

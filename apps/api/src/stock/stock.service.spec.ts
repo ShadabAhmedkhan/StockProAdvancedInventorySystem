@@ -43,10 +43,14 @@ describe('StockService', () => {
     executeRaw = jest.fn(() => Promise.resolve(1));
 
     const client = {
-      product: { findUnique: productFindUnique },
+      // findMany empty: an outbound adjustment's LOW_STOCK/OUT_OF_STOCK check finds no
+      // matching product, so these tests don't also need to stub the notification fan-out.
+      product: { findUnique: productFindUnique, findMany: jest.fn(() => Promise.resolve([])) },
       inventory: { findUnique: inventoryFindUnique, findUniqueOrThrow: inventoryFindUniqueOrThrow },
       stockMovement: { create: movementCreate, findMany: movementFindMany, count: movementCount },
       location: { findFirstOrThrow: locationFindFirstOrThrow },
+      user: { findMany: jest.fn(() => Promise.resolve([])) },
+      notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
       $executeRaw: executeRaw,
     };
 

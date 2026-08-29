@@ -74,7 +74,9 @@ describe('OrdersService', () => {
     orderCreate = jest.fn(() => Promise.resolve({ id: ORDER_ID }));
     orderUpdate = jest.fn(() => Promise.resolve({ id: ORDER_ID }));
     orderFindUnique = jest.fn(() => Promise.resolve(orderRow()));
-    orderFindUniqueOrThrow = jest.fn(() => Promise.resolve({ discount: decimal('0.00'), tax: decimal('0.00'), paidAmount: decimal('0.00') }));
+    orderFindUniqueOrThrow = jest.fn(() =>
+      Promise.resolve({ orderNumber: 'ORD-00000042', discount: decimal('0.00'), tax: decimal('0.00'), total: decimal('50.00'), paidAmount: decimal('0.00') }),
+    );
     orderFindMany = jest.fn(() => Promise.resolve([]));
     orderCount = jest.fn(() => Promise.resolve(0));
 
@@ -142,6 +144,9 @@ describe('OrdersService', () => {
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },
       stockMovement: { createMany: jest.fn(() => Promise.resolve({ count: 1 })) },
       location: { findFirstOrThrow: jest.fn(() => Promise.resolve({ id: 'location-1' })) },
+      // Completion consumes stock, which checks for a LOW_STOCK/OUT_OF_STOCK crossing.
+      user: { findMany: jest.fn(() => Promise.resolve([])) },
+      notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     };

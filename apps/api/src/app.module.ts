@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, type ConfigType } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -22,6 +23,7 @@ import { platformAdminConfig } from './config/platform-admin.config';
 import { stripeConfig } from './config/stripe.config';
 import { HealthModule } from './health/health.module';
 import { LocationsModule } from './locations/locations.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { OrdersModule } from './orders/orders.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -56,6 +58,7 @@ import { UsersModule } from './users/users.module';
         throttlers: [{ ttl: config.throttle.ttlMs, limit: config.throttle.limit }],
       }),
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuditModule,
     AuthModule,
@@ -77,6 +80,7 @@ import { UsersModule } from './users/users.module';
     RepairsModule,
     ReturnsModule,
     FinanceModule,
+    NotificationsModule,
     DashboardModule,
     ReportsModule,
     SettingsModule,

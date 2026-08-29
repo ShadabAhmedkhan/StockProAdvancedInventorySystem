@@ -43,7 +43,7 @@ test.describe('stock counts', () => {
     await page.getByRole('button', { name: 'Create draft' }).click();
     await page.waitForURL('**/dashboard/stock-counts/*');
 
-    await page.getByPlaceholder('Search products by SKU or name to add a line').fill(sku);
+    await page.getByPlaceholder('Scan a barcode or search by SKU/name').fill(sku);
     await page.getByText(name, { exact: false }).click();
     await expect(page.getByText(sku)).toBeVisible();
 

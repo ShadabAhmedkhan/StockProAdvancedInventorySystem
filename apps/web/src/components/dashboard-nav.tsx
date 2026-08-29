@@ -3,6 +3,7 @@
 import {
   LayoutDashboard,
   ShoppingCart,
+  Zap,
   Wrench,
   Undo2,
   Package,
@@ -39,6 +40,7 @@ export interface NavLink {
 /** Exported so the command palette's "Go to X" commands share one definition with the nav bar, rather than a second hand-kept list drifting out of sync. */
 export const NAV_LINKS: NavLink[] = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/dashboard/pos', label: 'POS', icon: Zap, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
   { href: '/dashboard/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/dashboard/repairs', label: 'Repairs', icon: Wrench },
   { href: '/dashboard/returns', label: 'Returns', icon: Undo2 },
