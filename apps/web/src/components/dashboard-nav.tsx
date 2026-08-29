@@ -23,6 +23,7 @@ import {
   ScrollText,
   Settings,
   CreditCard,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -58,6 +59,7 @@ export const NAV_LINKS: NavLink[] = [
   { href: '/dashboard/automation', label: 'Automation', icon: Workflow, roles: ['ADMIN', 'MANAGER'] },
   { href: '/dashboard/finance', label: 'Finance', icon: Wallet },
   { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/dashboard/assistant', label: 'AI Assistant', icon: Sparkles, roles: ['ADMIN', 'MANAGER'] },
   { href: '/dashboard/users', label: 'Users', icon: UserCog, roles: ['ADMIN', 'MANAGER'] },
   { href: '/dashboard/audit', label: 'Audit', icon: ScrollText, roles: ['ADMIN'] },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings, roles: ['ADMIN', 'MANAGER'] },

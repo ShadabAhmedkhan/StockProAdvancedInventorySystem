@@ -6,6 +6,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { AutomationRulesModule } from './automation/automation-rules.module';
+import { AiModule } from './ai/ai.module';
 import { BillingModule } from './billing/billing.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
@@ -16,6 +17,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { SubscriptionGuard } from './common/guards/subscription.guard';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
+import { aiConfig } from './config/ai.config';
 import { appConfig } from './config/app.config';
 import { databaseConfig } from './config/database.config';
 import { validateEnv } from './config/env.validation';
@@ -50,7 +52,7 @@ import { UsersModule } from './users/users.module';
       // Resolved against the process working directory: the first entry covers
       // running from the app folder, the second the monorepo root .env.
       envFilePath: ['.env', '../../.env'],
-      load: [appConfig, databaseConfig, jwtConfig, stripeConfig, platformAdminConfig],
+      load: [appConfig, databaseConfig, jwtConfig, stripeConfig, platformAdminConfig, aiConfig],
       validate: validateEnv,
     }),
     ThrottlerModule.forRootAsync({
@@ -87,6 +89,7 @@ import { UsersModule } from './users/users.module';
     ReportsModule,
     SettingsModule,
     HealthModule,
+    AiModule,
   ],
   providers: [
     // Order matters: rate limiting rejects floods before any work is done,

@@ -77,16 +77,17 @@ export default function CustomerDetailPage(): React.JSX.Element {
 
   function addTag(): void {
     const tag = tagInput.trim();
-    if (tag === '' || customer!.tags.includes(tag)) {
+    if (tag === '' || customer === undefined || customer.tags.includes(tag)) {
       setTagInput('');
       return;
     }
-    void runAction(() => updateTagsMutation.mutateAsync([...customer!.tags, tag]));
+    void runAction(() => updateTagsMutation.mutateAsync([...customer.tags, tag]));
     setTagInput('');
   }
 
   function removeTag(tag: string): void {
-    void runAction(() => updateTagsMutation.mutateAsync(customer!.tags.filter((existing) => existing !== tag)));
+    if (customer === undefined) return;
+    void runAction(() => updateTagsMutation.mutateAsync(customer.tags.filter((existing) => existing !== tag)));
   }
 
   return (
@@ -111,7 +112,14 @@ export default function CustomerDetailPage(): React.JSX.Element {
             <Badge key={tag} className="bg-muted text-muted-foreground">
               {tag}
               {canWrite && (
-                <button type="button" className="ml-1 hover:text-foreground" onClick={() => removeTag(tag)} aria-label={`Remove ${tag}`}>
+                <button
+                  type="button"
+                  className="ml-1 hover:text-foreground"
+                  onClick={() => {
+                    removeTag(tag);
+                  }}
+                  aria-label={`Remove ${tag}`}
+                >
                   &times;
                 </button>
               )}
@@ -286,7 +294,7 @@ export default function CustomerDetailPage(): React.JSX.Element {
         <CardContent className="space-y-3">
           {addressesQuery.isLoading && <TableSkeleton rows={2} />}
           {addressesQuery.isError && <p className="text-sm text-danger">{errorMessage(addressesQuery.error)}</p>}
-          {addressesQuery.data !== undefined && addressesQuery.data.length === 0 && (
+          {addressesQuery.data?.length === 0 && (
             <p className="text-sm text-muted-foreground">No saved addresses.</p>
           )}
           {addressesQuery.data?.map((address) => (

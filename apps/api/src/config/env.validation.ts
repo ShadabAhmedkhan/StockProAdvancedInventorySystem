@@ -121,6 +121,19 @@ export class EnvironmentVariables {
   @IsOptional()
   @MinLength(8)
   PLATFORM_ADMIN_PASSWORD?: string;
+
+  /**
+   * StockPro Intelligence (Phase 42) is optional infrastructure, same pattern
+   * as Stripe above: an environment with no key boots and runs fine, `/ai/ask`
+   * just refuses at the point of use instead of the whole API refusing to boot.
+   */
+  @IsOptional()
+  @MinLength(1)
+  ANTHROPIC_API_KEY?: string;
+
+  @IsOptional()
+  @MinLength(1)
+  ANTHROPIC_MODEL?: string;
 }
 
 /**

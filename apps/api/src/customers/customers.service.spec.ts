@@ -314,7 +314,7 @@ describe('CustomersService', () => {
 
   describe('lifetimeValue', () => {
     it('sums paid order amounts and repair payments', async () => {
-      orderAggregate.mockResolvedValue({ _sum: { paidAmount: { toFixed: () => '100.00', add: (n: { toFixed: () => string }) => ({ toFixed: () => '150.00' }) } } });
+      orderAggregate.mockResolvedValue({ _sum: { paidAmount: { toFixed: () => '100.00', add: (_n: { toFixed: () => string }) => ({ toFixed: () => '150.00' }) } } });
       paymentAggregate.mockResolvedValue({ _sum: { amount: { toFixed: () => '50.00' } } });
 
       const result = await service.lifetimeValue('customer-1');
