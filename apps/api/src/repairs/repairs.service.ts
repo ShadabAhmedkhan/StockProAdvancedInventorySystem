@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { runAutomationRules } from '../automation/evaluate-automation';
 import type { CreatePaymentDto } from '../common/dto/create-payment.dto';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { ErrorCode } from '../common/enums/error-code.enum';
@@ -233,14 +234,27 @@ export class RepairsService {
           userId,
         });
 
+        const organizationId = getCurrentOrgId();
+        const title = 'Repair ready for pickup';
+        const message = `Repair ${current.repairNumber} is ready for the customer`;
+
         await notify(tx, {
-          organizationId: getCurrentOrgId(),
+          organizationId,
           type: NotificationType.REPAIR_READY,
-          title: 'Repair ready for pickup',
-          message: `Repair ${current.repairNumber} is ready for the customer`,
+          title,
+          message,
           entityType: 'REPAIR',
           entityId: id,
           extraUserIds: current.technicianId === null ? [] : [current.technicianId],
+        });
+        await runAutomationRules(tx, {
+          organizationId,
+          trigger: NotificationType.REPAIR_READY,
+          context: { repairNumber: current.repairNumber },
+          title,
+          message,
+          entityType: 'REPAIR',
+          entityId: id,
         });
       }
 

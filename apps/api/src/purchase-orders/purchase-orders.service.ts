@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { runAutomationRules } from '../automation/evaluate-automation';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { restoreStock, type StockLine } from '../common/inventory/stock-operations';
 import { ErrorCode } from '../common/enums/error-code.enum';
@@ -306,11 +307,17 @@ export class PurchaseOrdersService {
       });
 
       if (fullyReceived) {
-        await notify(tx, {
-          organizationId: getCurrentOrgId(),
-          type: NotificationType.PURCHASE_RECEIVED,
-          title: 'Purchase order received',
-          message: `Purchase order ${updated.poNumber} is fully received`,
+        const organizationId = getCurrentOrgId();
+        const title = 'Purchase order received';
+        const message = `Purchase order ${updated.poNumber} is fully received`;
+
+        await notify(tx, { organizationId, type: NotificationType.PURCHASE_RECEIVED, title, message, entityType: 'PURCHASE_ORDER', entityId: id });
+        await runAutomationRules(tx, {
+          organizationId,
+          trigger: NotificationType.PURCHASE_RECEIVED,
+          context: { poNumber: updated.poNumber },
+          title,
+          message,
           entityType: 'PURCHASE_ORDER',
           entityId: id,
         });

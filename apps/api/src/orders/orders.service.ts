@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { runAutomationRules } from '../automation/evaluate-automation';
 import { nextDocumentNumber } from '../common/documents/document-number';
 import { consumeStock, releaseStock, reserveStock, type StockLine } from '../common/inventory/stock-operations';
 import { ErrorCode } from '../common/enums/error-code.enum';
@@ -207,11 +208,17 @@ export class OrdersService {
       await this.auditService.record({ userId, action: AuditAction.ORDER_COMPLETED, entity: AuditEntity.ORDER, entityId: id }, tx);
 
       const order = await tx.order.findUniqueOrThrow({ where: { id }, select: { orderNumber: true, total: true } });
-      await notify(tx, {
-        organizationId: getCurrentOrgId(),
-        type: NotificationType.ORDER_COMPLETED,
-        title: 'Sale completed',
-        message: `Order ${order.orderNumber} completed for ${order.total.toFixed(2)}`,
+      const organizationId = getCurrentOrgId();
+      const title = 'Sale completed';
+      const message = `Order ${order.orderNumber} completed for ${order.total.toFixed(2)}`;
+
+      await notify(tx, { organizationId, type: NotificationType.ORDER_COMPLETED, title, message, entityType: 'ORDER', entityId: id });
+      await runAutomationRules(tx, {
+        organizationId,
+        trigger: NotificationType.ORDER_COMPLETED,
+        context: { orderNumber: order.orderNumber, total: order.total.toNumber() },
+        title,
+        message,
         entityType: 'ORDER',
         entityId: id,
       });

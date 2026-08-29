@@ -165,6 +165,20 @@ enum NotificationType {
   SUBSCRIPTION_PAYMENT_FAILED
 }
 
+enum AutomationConditionOperator {
+  EQUALS
+  NOT_EQUALS
+  GREATER_THAN
+  LESS_THAN
+}
+
+/// The only actions a rule may perform. Deliberately a closed set - "don't
+/// let arbitrary user-defined code execute" - so adding a new capability
+/// means shipping code, not letting a tenant configure one.
+enum AutomationActionType {
+  NOTIFY
+}
+
 enum AuditAction {
   CREATE
   UPDATE
@@ -344,6 +358,7 @@ model Organization {
   productUnits          ProductUnit[]
   stockCounts           StockCount[]
   notifications         Notification[]
+  automationRules       AutomationRule[]
 
   @@index([subscriptionStatus])
 }
@@ -398,6 +413,7 @@ model User {
   stockCountsCreated    StockCount[]           @relation("StockCountCreatedBy")
   stockCountsApproved   StockCount[]           @relation("StockCountApprovedBy")
   notifications         Notification[]
+  automationRulesCreated AutomationRule[]
 
   @@index([organizationId])
   @@index([role])
@@ -1328,4 +1344,32 @@ model Notification {
 
   @@index([organizationId, userId, isRead, createdAt])
   @@index([entityType, entityId])
+}
+
+/// WHEN `triggerType` fires, IF every condition matches the event's own
+/// context, THEN perform `actionType`. `conditions` is data, not code: each
+/// entry is one `{field, operator, value}` comparison evaluated in
+/// `automation/evaluate-automation.ts` against a plain object the trigger
+/// site supplies (e.g. LOW_STOCK's context has `sku`, `categoryName`,
+/// `quantity`) - there is no expression language and nothing here is ever
+/// passed to `eval` or a template engine.
+model AutomationRule {
+  id             String                      @id @default(uuid(7)) @db.Uuid
+  organizationId String                      @db.Uuid
+  name           String                      @db.VarChar(150)
+  triggerType    NotificationType
+  conditions     Json                        @default("[]")
+  actionType     AutomationActionType        @default(NOTIFY)
+  /// Who NOTIFY fans out to - on top of, not instead of, that event's own default audience.
+  actionRoles    UserRole[]
+  isActive       Boolean                     @default(true)
+  createdById    String                      @db.Uuid
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([triggerType, isActive])
 }

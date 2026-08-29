@@ -33,6 +33,7 @@ const TENANT_MODELS = new Set([
   'ProductUnit',
   'StockCount',
   'Notification',
+  'AutomationRule',
 ]);
 
 const READ_OR_MUTATE_BY_WHERE = new Set([

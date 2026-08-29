@@ -3,6 +3,7 @@ import type { TenantTransactionClient } from '../../prisma/tenant-prisma.provide
 import { getCurrentOrgId } from '../tenant/tenant-context';
 import { ErrorCode } from '../enums/error-code.enum';
 import type { Prisma } from '../../generated/prisma/client';
+import { runAutomationRules } from '../../automation/evaluate-automation';
 import { NotificationType, type StockMovementType, type StockReferenceType } from '../../generated/prisma/enums';
 import { notify } from '../../notifications/notify';
 
@@ -172,9 +173,10 @@ export async function notifyLowStock(tx: Prisma.TransactionClient | TenantTransa
   // identically at runtime - the tenant extension only adds a `where` clause,
   // it does not remove or reshape any method - so this is purely a type-level
   // escape, not a behaviour change.
-  const products = await (tx as Prisma.TransactionClient).product.findMany({
+  const plainClient = tx as Prisma.TransactionClient;
+  const products = await plainClient.product.findMany({
     where: { id: { in: [...newQuantities.keys()] } },
-    select: { id: true, sku: true, name: true, minimumStock: true },
+    select: { id: true, sku: true, name: true, minimumStock: true, category: { select: { name: true } } },
   });
 
   const organizationId = getCurrentOrgId();
@@ -186,14 +188,19 @@ export async function notifyLowStock(tx: Prisma.TransactionClient | TenantTransa
     }
 
     const type = quantity <= 0 ? NotificationType.OUT_OF_STOCK : NotificationType.LOW_STOCK;
-    await notify(tx, {
+    const title = type === NotificationType.OUT_OF_STOCK ? 'Out of stock' : 'Low stock';
+    const message =
+      type === NotificationType.OUT_OF_STOCK
+        ? `${product.name} (${product.sku}) is out of stock`
+        : `${product.name} (${product.sku}) is low on stock: ${String(quantity)} left`;
+
+    await notify(plainClient, { organizationId, type, title, message, entityType: 'PRODUCT', entityId: product.id });
+    await runAutomationRules(plainClient, {
       organizationId,
-      type,
-      title: type === NotificationType.OUT_OF_STOCK ? 'Out of stock' : 'Low stock',
-      message:
-        type === NotificationType.OUT_OF_STOCK
-          ? `${product.name} (${product.sku}) is out of stock`
-          : `${product.name} (${product.sku}) is low on stock: ${String(quantity)} left`,
+      trigger: type,
+      context: { sku: product.sku, name: product.name, categoryName: product.category.name, quantity },
+      title,
+      message,
       entityType: 'PRODUCT',
       entityId: product.id,
     });

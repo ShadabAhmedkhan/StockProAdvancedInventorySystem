@@ -73,6 +73,7 @@ describe('stock operations', () => {
       product: { findMany: productFindMany },
       user: { findMany: userFindMany },
       notification: { createMany: notificationCreateMany },
+      automationRule: { findMany: jest.fn(() => Promise.resolve([])) },
     } as unknown as Prisma.TransactionClient;
   });
 

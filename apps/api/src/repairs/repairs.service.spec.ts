@@ -121,6 +121,7 @@ describe('RepairsService', () => {
       customer: { findUnique: customerFindUnique },
       user: { findUnique: userFindUnique, findMany: jest.fn(() => Promise.resolve([])) },
       notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
+      automationRule: { findMany: jest.fn(() => Promise.resolve([])) },
       payment: { create: paymentCreate, aggregate: paymentAggregate, findMany: jest.fn(() => Promise.resolve([])) },
       financialTransaction: { create: jest.fn(() => Promise.resolve({})) },
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },

@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { AutomationRulesModule } from './automation/automation-rules.module';
 import { BillingModule } from './billing/billing.module';
 import { BrandsModule } from './brands/brands.module';
 import { CategoriesModule } from './categories/categories.module';
@@ -81,6 +82,7 @@ import { UsersModule } from './users/users.module';
     ReturnsModule,
     FinanceModule,
     NotificationsModule,
+    AutomationRulesModule,
     DashboardModule,
     ReportsModule,
     SettingsModule,

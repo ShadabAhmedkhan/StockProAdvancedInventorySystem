@@ -11,7 +11,7 @@ import { UserRole, type NotificationType } from '../generated/prisma/enums';
  * for every model is combinatorial. A two-method structural interface sidesteps
  * that entirely: assignability only has to check these two shapes, not the client.
  */
-interface NotifyClient {
+export interface NotifyClient {
   user: {
     findMany(args: { where: { organizationId: string; role: { in: UserRole[] }; status: 'ACTIVE' }; select: { id: true } }): Promise<{ id: string }[]>;
   };

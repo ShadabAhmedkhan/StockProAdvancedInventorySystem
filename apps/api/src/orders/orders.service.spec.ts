@@ -99,7 +99,9 @@ describe('OrdersService', () => {
 
     itemCreateMany = jest.fn(() => Promise.resolve({ count: 1 }));
 
-    productFindUnique = jest.fn(() => Promise.resolve({ sku: 'SPH-AUR-A12', sellingPrice: decimal('25.00'), isActive: true, deletedAt: null }));
+    productFindUnique = jest.fn(() =>
+      Promise.resolve({ sku: 'SPH-AUR-A12', sellingPrice: decimal('25.00'), isActive: true, deletedAt: null, minimumStock: 0, category: { name: 'Phones' } }),
+    );
     // The batched lookup `create()` uses for its opening lines; sourced from the same
     // override point (`productFindUnique.mockResolvedValue(...)`) so existing tests that
     // configure a single product's shape work for both the single-item and batch paths.
@@ -144,9 +146,11 @@ describe('OrdersService', () => {
       inventory: { findUnique: jest.fn(() => Promise.resolve({ quantity: 10, reservedQuantity: 0 })) },
       stockMovement: { createMany: jest.fn(() => Promise.resolve({ count: 1 })) },
       location: { findFirstOrThrow: jest.fn(() => Promise.resolve({ id: 'location-1' })) },
-      // Completion consumes stock, which checks for a LOW_STOCK/OUT_OF_STOCK crossing.
+      // Completion consumes stock, which checks for a LOW_STOCK/OUT_OF_STOCK crossing,
+      // and every notified event also checks for matching automation rules.
       user: { findMany: jest.fn(() => Promise.resolve([])) },
       notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
+      automationRule: { findMany: jest.fn(() => Promise.resolve([])) },
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
     };

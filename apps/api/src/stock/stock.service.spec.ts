@@ -51,6 +51,7 @@ describe('StockService', () => {
       location: { findFirstOrThrow: locationFindFirstOrThrow },
       user: { findMany: jest.fn(() => Promise.resolve([])) },
       notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
+      automationRule: { findMany: jest.fn(() => Promise.resolve([])) },
       $executeRaw: executeRaw,
     };
 
