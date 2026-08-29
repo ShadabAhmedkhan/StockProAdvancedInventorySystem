@@ -58,6 +58,7 @@ enum StockReferenceType {
   PURCHASE
   MANUAL
   TRANSFER
+  STOCK_COUNT
 }
 
 enum OrderStatus {
@@ -181,6 +182,9 @@ enum AuditAction {
   STOCK_TRANSFER_SHIPPED
   STOCK_TRANSFER_COMPLETED
   STOCK_TRANSFER_CANCELLED
+  STOCK_COUNT_APPROVED
+  STOCK_COUNT_COMPLETED
+  STOCK_COUNT_CANCELLED
 }
 
 enum AuditEntity {
@@ -203,6 +207,20 @@ enum AuditEntity {
   GOODS_RECEIPT
   STOCK_TRANSFER
   PRODUCT_UNIT
+  STOCK_COUNT
+}
+
+/// The stock count lifecycle:
+/// DRAFT -> COUNTING -> REVIEW -> APPROVED -> COMPLETED, with CANCELLED
+/// reachable from DRAFT, COUNTING or REVIEW (not once stock has been
+/// adjusted, which happens atomically on the REVIEW -> APPROVED transition).
+enum StockCountStatus {
+  DRAFT
+  COUNTING
+  REVIEW
+  APPROVED
+  COMPLETED
+  CANCELLED
 }
 
 /// A product's unit-level identity tracking strategy. NONE is the default
@@ -313,6 +331,7 @@ model Organization {
   locations             Location[]
   stockTransfers        StockTransfer[]
   productUnits          ProductUnit[]
+  stockCounts           StockCount[]
 
   @@index([subscriptionStatus])
 }
@@ -364,6 +383,8 @@ model User {
   goodsReceiptsRecorded GoodsReceipt[]
   locationAccess        UserLocationAccess[]
   stockTransfersCreated StockTransfer[]
+  stockCountsCreated    StockCount[]           @relation("StockCountCreatedBy")
+  stockCountsApproved   StockCount[]           @relation("StockCountApprovedBy")
 
   @@index([organizationId])
   @@index([role])
@@ -544,6 +565,7 @@ model Product {
   purchaseOrderItems PurchaseOrderItem[]
   stockTransferItems StockTransferItem[]
   units              ProductUnit[]
+  stockCountItems    StockCountItem[]
 
   @@unique([organizationId, sku])
   @@unique([organizationId, barcode])
@@ -588,6 +610,7 @@ model Location {
   transfersFrom  StockTransfer[]      @relation("StockTransferSource")
   transfersTo    StockTransfer[]      @relation("StockTransferDestination")
   productUnits   ProductUnit[]
+  stockCounts    StockCount[]
 
   @@index([organizationId])
   @@index([deletedAt])
@@ -698,6 +721,60 @@ model ProductUnit {
   @@index([productId])
   @@index([status])
   @@index([locationId])
+}
+
+/// A physical stock count at one location. `StockCountItem.expectedQuantity`
+/// is a snapshot taken when the item is added, not a live read of Inventory -
+/// a count has to compare against what the system believed at the moment
+/// counting started, not against a number that keeps moving under it.
+model StockCount {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  organizationId String           @db.Uuid
+  countNumber    String           @db.VarChar(32)
+  locationId     String           @db.Uuid
+  status         StockCountStatus @default(DRAFT)
+  notes          String?
+  createdById    String           @db.Uuid
+  approvedById   String?          @db.Uuid
+  approvedAt     DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Restrict: a location with recorded counts cannot be deleted out from under them.
+  location     Location     @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  createdBy    User         @relation("StockCountCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy   User?        @relation("StockCountApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  items        StockCountItem[]
+
+  @@unique([organizationId, countNumber])
+  @@index([organizationId])
+  @@index([locationId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// One line per product included in a count. `countedQuantity` is null until
+/// someone counts it; re-entering it (a recount) simply overwrites the
+/// previous value while the count is still in COUNTING.
+model StockCountItem {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  stockCountId     String    @db.Uuid
+  productId        String    @db.Uuid
+  expectedQuantity Int
+  countedQuantity  Int?
+  notes            String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  stockCount StockCount @relation(fields: [stockCountId], references: [id], onDelete: Cascade)
+  // Restrict: a product counted at least once cannot vanish out from under the ledger.
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([stockCountId, productId])
+  @@index([stockCountId])
+  @@index([productId])
 }
 
 // ---------------------------------------------------------------------------

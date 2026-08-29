@@ -33,6 +33,7 @@ import { ReportsModule } from './reports/reports.module';
 import { ReturnsModule } from './returns/returns.module';
 import { SettingsModule } from './settings/settings.module';
 import { StockModule } from './stock/stock.module';
+import { StockCountsModule } from './stock-counts/stock-counts.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { UsersModule } from './users/users.module';
@@ -72,6 +73,7 @@ import { UsersModule } from './users/users.module';
     OrdersModule,
     PurchaseOrdersModule,
     StockTransfersModule,
+    StockCountsModule,
     RepairsModule,
     ReturnsModule,
     FinanceModule,
