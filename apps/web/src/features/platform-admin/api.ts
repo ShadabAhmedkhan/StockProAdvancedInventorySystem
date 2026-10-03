@@ -1,7 +1,7 @@
 import { ApiError, type ApiErrorBody, type ApiResponse } from '@/lib/api-client';
 import { API_URL } from '@/lib/env';
 import { getPlatformAdminToken, setPlatformAdminSession } from '@/lib/platform-admin-token';
-import type { PlatformAdminSession, PlatformOrganizationSummary, PlatformOrganizationUser } from './types';
+import type { PlatformAdminSession, PlatformOrganizationActivity, PlatformOrganizationSummary, PlatformOrganizationUser } from './types';
 
 /**
  * A separate, minimal fetch wrapper rather than reusing `apiClient`: that
@@ -32,10 +32,15 @@ async function platformAdminRequest<T>(path: string, options: { method?: string;
 }
 
 export const platformAdminApi = {
-  login: (email: string, password: string): Promise<PlatformAdminSession> => platformAdminRequest<PlatformAdminSession>('/platform-admin/auth/login', { method: 'POST', body: { email, password } }),
+  login: (email: string, password: string): Promise<PlatformAdminSession> =>
+    platformAdminRequest<PlatformAdminSession>('/platform-admin/auth/login', { method: 'POST', body: { email, password } }),
   listOrganizations: (): Promise<PlatformOrganizationSummary[]> => platformAdminRequest<PlatformOrganizationSummary[]>('/platform-admin/organizations'),
   listOrganizationUsers: (organizationId: string): Promise<PlatformOrganizationUser[]> =>
     platformAdminRequest<PlatformOrganizationUser[]>(`/platform-admin/organizations/${organizationId}/users`),
+  listOrganizationActivity: (organizationId: string): Promise<PlatformOrganizationActivity[]> =>
+    platformAdminRequest<PlatformOrganizationActivity[]>(`/platform-admin/organizations/${organizationId}/activity`),
+  extendTrial: (organizationId: string, days: number): Promise<PlatformOrganizationSummary> =>
+    platformAdminRequest<PlatformOrganizationSummary>(`/platform-admin/organizations/${organizationId}/trial`, { method: 'PATCH', body: { days } }),
   suspend: (organizationId: string): Promise<PlatformOrganizationSummary> =>
     platformAdminRequest<PlatformOrganizationSummary>(`/platform-admin/organizations/${organizationId}/suspend`, { method: 'PATCH' }),
   reactivate: (organizationId: string): Promise<PlatformOrganizationSummary> =>

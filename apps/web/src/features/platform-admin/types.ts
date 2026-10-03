@@ -7,6 +7,7 @@ export interface PlatformOrganizationSummary {
   trialEndsAt: string | null;
   createdAt: string;
   userCount: number;
+  lastLoginAt: string | null;
 }
 
 export interface PlatformOrganizationUser {
@@ -17,6 +18,13 @@ export interface PlatformOrganizationUser {
   role: string;
   status: string;
   lastLoginAt: string | null;
+}
+
+export interface PlatformOrganizationActivity {
+  id: string;
+  action: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
 }
 
 export interface PlatformAdminSession {
